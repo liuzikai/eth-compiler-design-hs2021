@@ -197,6 +197,52 @@ exception Redefined_sym of lbl
 
   HINT: List.fold_left and List.fold_right are your friends.
  *)
+
+
+(* Separate text and data segments and order them into two list.
+   Input: p - a program
+   Output: list of text segments, list of data segments
+ *)
+let separate_segments (p: prog) : (prog * prog) =
+  (* Tail recursion implementation *)
+  let rec separate_segments_impl (text_list: prog) (data_list: prog) (p: prog) : (prog * prog) =
+    match p with
+      | h :: t -> (
+        match h.asm with
+          | Text _ -> separate_segments_impl (h :: text_list) data_list t
+          | Data _ -> separate_segments_impl text_list (h :: data_list) t
+        )
+      | [] -> (text_list, data_list)
+  in
+  match separate_segments_impl [] [] p with
+    text_list, data_list -> (List.rev text_list), (List.rev data_list)
+
+
+(* Calculate addresses of labels and return an associative list.
+   Input: p - concatenated text and data segments in order
+   Output: a list of (Lbl ..., Imm ...)
+   Side-effect: raise Redefined_sym if duplicates found.
+ *)
+let calc_label_addresses (start: quad) (p: prog) : (imm * imm) list =
+  (* Tail recursion implementation *)
+  let rec calc_label_addresses (ret: (imm * imm) list) (labels: string list) (start: quad) (p: prog) : (imm * imm) list =
+    match p with
+      | [] -> ret
+      | h :: t -> (
+        let asm_len: quad = Int64.mul 8L (Int64.of_int (
+          match h.asm with
+            | Data l -> List.length l
+            | Text l -> List.length l
+        ))
+        in
+        if List.exists (fun (l: lbl) : bool -> (l = h.lbl)) labels then
+          raise (Redefined_sym h.lbl)
+        else
+          calc_label_addresses ((Lbl h.lbl, Lit start) :: ret) (h.lbl :: labels) (Int64.add start asm_len) t
+      )
+  in
+  List.rev (calc_label_addresses [] [] start p)
+
 let assemble (p:prog) : exec =
 failwith "assemble unimplemented"
 
