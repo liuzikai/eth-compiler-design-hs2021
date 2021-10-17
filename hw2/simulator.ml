@@ -163,6 +163,12 @@ let map_addr (addr:quad) : int option =
  (* else None *)
  else None
 
+(* Wrapper function for map_addr *)
+let map_addr_or_seg_fault (addr: quad) : int =
+  match map_addr addr with
+    | Some ret -> ret
+    | None -> raise X86lite_segfault
+
 (* Simulates one step of the machine:
     - fetch the instruction at %rip
     - compute the source and/or destination information from the operands
@@ -350,7 +356,7 @@ let assemble (p:prog) : exec =
     - allocate the mem array
     - set up the memory state by writing the symbolic bytes to the 
       appropriate locations 
-    - create the inital register state
+    - create the initial register state
       - initialize rip to the entry point address
       - initializes rsp to the last word in memory 
       - the other registers are initialized to 0
@@ -360,4 +366,15 @@ let assemble (p:prog) : exec =
   may be of use.
 *)
 let load {entry; text_pos; data_pos; text_seg; data_seg} : mach = 
-failwith "load unimplemented"
+  let m = {
+    flags = { fo = false; fs = false; fz = false };
+    regs = Array.make nregs 0L;
+    mem = Array.make (Int64.to_int (Int64.sub mem_top mem_bot)) (Byte '\x00')
+  } in
+  let last_word_addr = (Int64.sub mem_top 8L) in
+  Array.blit (Array.of_list text_seg) 0 m.mem (map_addr_or_seg_fault text_pos) (List.length text_seg);
+  Array.blit (Array.of_list data_seg) 0 m.mem (map_addr_or_seg_fault data_pos) (List.length data_seg);
+  Array.blit (Array.of_list (sbytes_of_int64 exit_addr)) 0 m.mem (map_addr_or_seg_fault last_word_addr) 8;
+  m.regs.((rind Rip)) <- entry;
+  m.regs.((rind Rsp)) <- last_word_addr;
+  m
