@@ -6,7 +6,7 @@ open Asm
 (* You can use this file for additional test cases to help your *)
 (* implementation.                                              *)
 
-let helloword_texts = [ text "foo"
+let helloword_text_elems = [ text "foo"
                              [ Xorq, [~%Rax; ~%Rax]
                              ; Movq, [~$100; ~%Rax]
                              ; Retq, []
@@ -16,7 +16,10 @@ let helloword_texts = [ text "foo"
                              ; Movq, [Ind1 (Lbl "baz"); ~%Rax]
                              ; Retq, []
                              ]]
-
+let helloword_data_elems = [ data "baz" 
+                                  [ Quad (Lit 99L)
+                                  ; Asciz "Hello, world!"
+                                  ]]
 let helloword_text_labels = [("foo", 0x400000L); ("main", 0x400018L)]
 let helloword_data_labels = [("baz", 0x400030L)]
 let helloword_labels = helloword_text_labels @ helloword_data_labels
@@ -30,11 +33,11 @@ let provided_tests : suite = [
   ]);
 
   Test ("calc_label_addresses", [
-    ("calc_label_addresses_1", assert_eqf (fun () -> calc_label_addresses 0L []) []);
-    ("calc_label_addresses_2", assert_eqf (fun () -> calc_label_addresses 0L [text "foo" []]) [("foo", 0L)]);
-    ("calc_label_addresses_3", assert_eqf (fun () -> calc_label_addresses 100L [text "foo" [Retq, []]; text "bar" []]) [("foo", 100L); ("bar", 108L)]);
-    ("calc_label_addresses_4", assert_eqf (fun () -> calc_label_addresses 100L [text "foo" [Retq, []]; text "bar" []; data "xyz" [Quad (Lit 42L)]]) [("foo", 100L); ("bar", 108L); ("xyz", 108L)]);
-    ("calc_label_addresses_5", assert_eqf (fun () -> calc_label_addresses 0x400000L Gradedtests.helloworld) helloword_labels);
+    ("calc_label_addresses_1", assert_eqf (fun () -> calc_label_addresses 0L []) ([], 0L));
+    ("calc_label_addresses_2", assert_eqf (fun () -> calc_label_addresses 0L [text "foo" []]) ([("foo", 0L)], 0L));
+    ("calc_label_addresses_3", assert_eqf (fun () -> calc_label_addresses 100L [text "foo" [Retq, []]; text "bar" []]) ([("foo", 100L); ("bar", 108L)], 108L));
+    ("calc_label_addresses_4", assert_eqf (fun () -> calc_label_addresses 100L [text "foo" [Retq, []]; text "bar" []; data "xyz" [Quad (Lit 42L)]]) ([("foo", 100L); ("bar", 108L); ("xyz", 108L)], 108L));
+    ("calc_label_addresses_5", assert_eqf (fun () -> calc_label_addresses 0x400000L Gradedtests.helloworld) (helloword_labels, 0x400030L));
     ("calc_label_addresses_6", (fun () -> try ignore (calc_label_addresses 0L [text "foo" []; data "foo" []]); failwith "expecting Redefined_sym" with (Redefined_sym "foo") -> ()));
   ]);
 
@@ -65,10 +68,16 @@ let provided_tests : suite = [
     ("replace_labels_in_data_3", (fun () -> try ignore (replace_labels_in_data (Quad (Lbl "foo")) []); failwith "expecting Undefined_sym" with (Undefined_sym "foo") -> ()));
   ]);
 
-  Test ("assemble_text_elem", [
-    ("assemble_text_elem_1", assert_eqf (fun () -> assemble_text_elem helloword_texts helloword_labels) Gradedtests.helloworld_textseg);
-    ("assemble_text_elem_2", (fun () -> try ignore (assemble_text_elem helloword_texts helloword_text_labels); failwith "expecting Undefined_sym" with (Undefined_sym "baz") -> ()));
-    ("assemble_text_elem_3", (fun () -> try ignore (assemble_text_elem Gradedtests.helloworld helloword_labels); failwith "expecting Invalid_argument" with (Invalid_argument _) -> ()));
-  ])
+  Test ("assemble_text_elems", [
+    ("assemble_text_elems_1", assert_eqf (fun () -> assemble_text_elems helloword_text_elems helloword_labels) Gradedtests.helloworld_textseg);
+    ("assemble_text_elems_2", (fun () -> try ignore (assemble_text_elems helloword_text_elems helloword_text_labels); failwith "expecting Undefined_sym" with (Undefined_sym "baz") -> ()));
+    ("assemble_text_elems_3", (fun () -> try ignore (assemble_text_elems Gradedtests.helloworld helloword_labels); failwith "expecting Invalid_argument" with (Invalid_argument _) -> ()));
+  ]);
+  
+  Test ("assemble_data_elems", [
+    ("assemble_data_elems_1", assert_eqf (fun () -> assemble_data_elems helloword_data_elems helloword_labels) Gradedtests.helloworld_dataseg);
+    ("assemble_data_elems_2", assert_eqf (fun () -> assemble_data_elems [data "foo" [Quad (Lbl "bar")]] [("foo", 100L); ("bar", 108L)]) [Byte '\x6C'; Byte '\x00'; Byte '\x00'; Byte '\x00'; Byte '\x00'; Byte '\x00'; Byte '\x00'; Byte '\x00']);
+    ("assemble_data_elems_3", (fun () -> try ignore (assemble_data_elems Gradedtests.helloworld helloword_labels); failwith "expecting Invalid_argument" with (Invalid_argument _) -> ()));
+  ]);
 
 ] 

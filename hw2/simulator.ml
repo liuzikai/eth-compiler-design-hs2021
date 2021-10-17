@@ -196,21 +196,6 @@ exception Undefined_sym of lbl
 (* Assemble should raise this when a label is defined more than once *)
 exception Redefined_sym of lbl
 
-(* Convert an X86 program into an object file:
-   - separate the text and data segments
-   - compute the size of each segment
-      Note: the size of an Asciz string section is (1 + the string length)
-            due to the null terminator
-
-   - resolve the labels to concrete addresses and 'patch' the instructions to 
-     replace Lbl values with the corresponding Imm values.
-
-   - the text segment starts at the lowest address
-   - the data segment starts after the text segment
-
-  HINT: List.fold_left and List.fold_right are your friends.
- *)
-
 
 (* Separate text and data segments and order them into two list.
    Input: p - a program
@@ -232,30 +217,36 @@ let separate_segments (p: prog) : (prog * prog) =
 
 
 (* Calculate addresses of labels and return an associative list.
-   Input: p - concatenated text and data segments in order
-   Output: a list of (label: lbl, address: quad)
+   Input: start - start address of the text segment
+          p     - concatenated text-data segments in order
+   Output: (a list of (label: lbl, address: quad), data segment start address)
    Side-effect: raise Redefined_sym if duplicates found.
  *)
-let calc_label_addresses (start: quad) (p: prog) : (lbl * quad) list =
+let calc_label_addresses (start: quad) (p: prog) : ((lbl * quad) list * quad) =
   (* Tail recursion implementation *)
-  let rec calc_label_addresses_impl (ret: (lbl * quad) list) (start: quad) (p: prog) : (lbl * quad) list =
+  let rec calc_label_addresses_impl (ret: (lbl * quad) list) (data_start : quad)
+                                    (start: quad) (p: prog) : ((lbl * quad) list * quad) =
     match p with
-      | [] -> ret
+      | [] -> (ret, data_start)
       | h :: t -> (
-        let asm_len: quad = Int64.mul 8L (Int64.of_int (
-          match h.asm with
-            | Data l -> List.length l
-            | Text l -> List.length l
-        ))
-        in
         if List.exists (fun (l, _) : bool -> (l = h.lbl)) ret then
           raise (Redefined_sym h.lbl)
         else
-          calc_label_addresses_impl ((h.lbl, start) :: ret) (Int64.add start asm_len) t
+          let asm_len: quad = Int64.mul 8L (Int64.of_int (
+            match h.asm with
+              | Data l -> List.length l
+              | Text l -> List.length l
+                                            ))
+          in (
+            match h.asm with
+              | Data _ -> calc_label_addresses_impl ((h.lbl, start) :: ret) data_start
+                                                    (Int64.add start asm_len) t
+              | Text _ -> calc_label_addresses_impl ((h.lbl, start) :: ret) (Int64.add data_start asm_len)
+                                                    (Int64.add start asm_len) t
+          )
       )
-  in
-  List.rev (calc_label_addresses_impl [] start p)
-
+  in let lookup, data_start = (calc_label_addresses_impl [] start start p) in
+  (List.rev lookup, data_start)
 
 
 (* Loop up a label or raise exception if not found *)
@@ -289,24 +280,71 @@ let replace_labels_in_data (d: data) (lookup: (lbl * quad) list) : data =
     | other -> other
 
 
-(* Assemble a list of text segments *)
-let assemble_text_elem (tl: elem list) (lookup: (lbl * quad) list) : sbyte list =
-  let assemble_ins_fold_left (ret: sbyte list) (i: ins) : sbyte list =
-    ret @ (sbytes_of_ins (replace_labels_in_ins i lookup))
+(* Generic function to assemble a list of text/data elems *)
+let assemble_generic_elems (replace_labels_fun: 'a -> (lbl * quad) list -> 'a)
+                           (sbytes_fun: 'a -> sbyte list)
+                           (asm_dispatch_fun: asm -> 'a list)
+                           (el: elem list)
+                           (lookup: (lbl * quad) list) : sbyte list =
+  let assemble_generic_fold_left (ret: sbyte list) (x: 'a) : sbyte list =
+    ret @ (sbytes_fun (replace_labels_fun x lookup))
   in
-  let rec assemble_text_impl (ret : sbyte list) (tl: elem list) : sbyte list =
-    match tl with
+  let rec assemble_generic_elem_impl (ret : sbyte list) (el: elem list) : sbyte list =
+    match el with
       | [] -> ret
-      | e :: t -> (
-      match e.asm with
-        | Text is -> assemble_text_impl (ret @ List.fold_left assemble_ins_fold_left [] is) t
-        | _ -> invalid_arg "assemble_text_segment_fold_left: tried to assemble a data segment!"
-      )
+      | e :: t -> assemble_generic_elem_impl (ret @ List.fold_left assemble_generic_fold_left [] (asm_dispatch_fun e.asm)) t
   in
-  assemble_text_impl [] tl
+  assemble_generic_elem_impl [] el
 
+
+(* Assemble a list of text segments *)
+let assemble_text_elems (tl: elem list) (lookup: (lbl * quad) list) : sbyte list =
+  assemble_generic_elems
+    replace_labels_in_ins
+    sbytes_of_ins
+    (fun asm -> match asm with
+      | Text is -> is
+      | _ -> invalid_arg "assemble_text_elems: tried to assemble a data elem!"
+    )
+    tl
+    lookup
+
+(* Assemble a list of data segments *)
+let assemble_data_elems (dl: elem list) (lookup: (lbl * quad) list) : sbyte list =
+  assemble_generic_elems
+    replace_labels_in_data
+    sbytes_of_data
+    (fun asm -> match asm with
+      | Data ds -> ds
+      | _ -> invalid_arg "assemble_data_elems: tried to assemble a text elem!"
+    )
+    dl
+    lookup
+
+
+(* Convert an X86 program into an object file:
+   - separate the text and data segments
+   - compute the size of each segment
+      Note: the size of an Asciz string section is (1 + the string length)
+            due to the null terminator
+
+   - resolve the labels to concrete addresses and 'patch' the instructions to
+     replace Lbl values with the corresponding Imm values.
+
+   - the text segment starts at the lowest address
+   - the data segment starts after the text segment
+
+  HINT: List.fold_left and List.fold_right are your friends.
+ *)
 let assemble (p:prog) : exec =
-failwith "assemble unimplemented"
+  let (text_elems, data_elems) = separate_segments p in
+  let (lookup, data_start) = calc_label_addresses mem_bot (text_elems @ data_elems) in
+  {  entry = lookup_label_or_raise_exception "main" lookup
+   ; text_pos = mem_bot
+   ; data_pos = data_start
+   ; text_seg = assemble_text_elems text_elems lookup
+   ; data_seg = assemble_data_elems data_elems lookup
+  }
 
 (* Convert an object file into an executable machine state. 
     - allocate the mem array
