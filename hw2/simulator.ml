@@ -233,12 +233,12 @@ let separate_segments (p: prog) : (prog * prog) =
 
 (* Calculate addresses of labels and return an associative list.
    Input: p - concatenated text and data segments in order
-   Output: a list of (Lbl ..., Imm ...)
+   Output: a list of (label: lbl, address: quad)
    Side-effect: raise Redefined_sym if duplicates found.
  *)
-let calc_label_addresses (start: quad) (p: prog) : (imm * imm) list =
+let calc_label_addresses (start: quad) (p: prog) : (lbl * quad) list =
   (* Tail recursion implementation *)
-  let rec calc_label_addresses (ret: (imm * imm) list) (labels: string list) (start: quad) (p: prog) : (imm * imm) list =
+  let rec calc_label_addresses_impl (ret: (lbl * quad) list) (start: quad) (p: prog) : (lbl * quad) list =
     match p with
       | [] -> ret
       | h :: t -> (
@@ -248,13 +248,62 @@ let calc_label_addresses (start: quad) (p: prog) : (imm * imm) list =
             | Text l -> List.length l
         ))
         in
-        if List.exists (fun (l: lbl) : bool -> (l = h.lbl)) labels then
+        if List.exists (fun (l, _) : bool -> (l = h.lbl)) ret then
           raise (Redefined_sym h.lbl)
         else
-          calc_label_addresses ((Lbl h.lbl, Lit start) :: ret) (h.lbl :: labels) (Int64.add start asm_len) t
+          calc_label_addresses_impl ((h.lbl, start) :: ret) (Int64.add start asm_len) t
       )
   in
-  List.rev (calc_label_addresses [] [] start p)
+  List.rev (calc_label_addresses_impl [] start p)
+
+
+
+(* Loop up a label or raise exception if not found *)
+let lookup_label_or_raise_exception (label: lbl) (lookup: (lbl * quad) list) : quad =
+  match List.assoc_opt label lookup with
+    | Some addr -> addr
+    | None -> raise (Undefined_sym label)
+
+
+(* Replace label in a single operand *)
+let replace_labels_in_operand (op: operand) (lookup: (lbl * quad) list) : operand =
+  match op with
+    | Imm (Lbl l) -> Imm (Lit (lookup_label_or_raise_exception l lookup))
+    | Ind1 (Lbl l) -> Ind1 (Lit (lookup_label_or_raise_exception l lookup))
+    | Ind3 (Lbl l, r) -> Ind3 (Lit (lookup_label_or_raise_exception l lookup), r)
+    | other -> other
+
+
+(* Replace label in a single instruction *)
+let replace_labels_in_ins (op, args) (lookup: (lbl * quad) list) : ins =
+  let replace_labels_in_operand_fold_left (ret: operand list) (arg: operand) : operand list (* reversed *) =
+    (replace_labels_in_operand arg lookup) :: ret
+  in
+  (op, (List.rev (List.fold_left replace_labels_in_operand_fold_left [] args)))
+
+
+(* Replace label in a single data *)
+let replace_labels_in_data (d: data) (lookup: (lbl * quad) list) : data =
+  match d with
+    | Quad (Lbl l) -> Quad (Lit (lookup_label_or_raise_exception l lookup))
+    | other -> other
+
+
+(* Assemble a list of text segments *)
+let assemble_text_elem (tl: elem list) (lookup: (lbl * quad) list) : sbyte list =
+  let assemble_ins_fold_left (ret: sbyte list) (i: ins) : sbyte list =
+    ret @ (sbytes_of_ins (replace_labels_in_ins i lookup))
+  in
+  let rec assemble_text_impl (ret : sbyte list) (tl: elem list) : sbyte list =
+    match tl with
+      | [] -> ret
+      | e :: t -> (
+      match e.asm with
+        | Text is -> assemble_text_impl (ret @ List.fold_left assemble_ins_fold_left [] is) t
+        | _ -> invalid_arg "assemble_text_segment_fold_left: tried to assemble a data segment!"
+      )
+  in
+  assemble_text_impl [] tl
 
 let assemble (p:prog) : exec =
 failwith "assemble unimplemented"
