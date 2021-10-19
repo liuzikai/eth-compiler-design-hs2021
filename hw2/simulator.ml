@@ -176,8 +176,95 @@ let map_addr_or_seg_fault (addr: quad) : int =
     - update the registers and/or memory appropriately
     - set the condition flags
 *)
+let get_src_dest (args: operand list) (index: int) (m: mach): int64 =
+	(*let x = List.nth args index in
+		begin match x with
+		| Imm i | Ind1 i -> begin match i with
+												| Lit l -> l
+												end
+		| Reg r | Ind2 r -> m.regs.(rind r)
+		| Ind3 (Lit l, r)  -> Int64.add (m.regs.(rind r)) l
+		| _ -> failwith "problem get_src_dest"
+		end*)
+	failwith "get unimplemented"
+
+let update_src_dest (args: operand list) (index: int) (new_value: int64) (m: mach): unit =
+	failwith "update unimplemented"
+
+let arith_instr (m: mach) (op: opcode) (args: operand list) : unit =
+	(*begin match op with
+	| Negq -> let dest = get_src_dest args 0 m in
+							let new_dest = Int64_overflow.neg dest in
+								update_src_dest args 0 new_dest.value m
+	| Addq -> x
+	| Subq -> x
+	| Imulq -> x
+	| Incq -> x
+	| Decq -> x
+	end*)
+	failwith "arith_instr unimplemented"
+
+let logic_instr (m: mach) (op: opcode) (args: operand list) : unit =
+	(*begin match op with
+	| Notq -> let dest = get_src_dest args 0 m in
+							let new_dest = Int64.lognot dest in
+								update_src_dest args 0 new_dest m
+	| Andq -> x
+	| Orq -> x
+	| Xorq -> x
+	end*)
+	failwith "logic_instr unimplemented"
+
+let bit_manipulation_instr (m: mach) (op: opcode) (args: operand list) : unit =
+	(*begin match op with
+	| Sarq -> x
+	| Shlq -> x
+	| Shrq -> x
+	| Set _ -> x
+	end*)
+	failwith "bit_manipulation_instr unimplemented"
+
+let data_move_instr (m: mach) (op: opcode) (args: operand list) : unit =
+	(*begin match op with
+	| Leaq -> x
+	| Movq -> x
+	| Pushq -> x
+	| Popq -> x
+	end*)
+	failwith "data_move_instr unimplemented"
+
+let ctrl_cond_instr (m: mach) (op: opcode) (args: operand list) : unit =
+	(*begin match op with
+	| Cmpq -> x
+	| Jmp -> x
+	| Callq -> x
+	| Retq -> x
+	| J _ -> x
+	end*)
+	failwith "ctrl_cond_instr unimplemented"
+
 let step (m:mach) : unit =
-failwith "step unimplemented"
+	let fetch_instr = m.regs.(rind Rip) in
+		let instr_addr = map_addr_or_seg_fault fetch_instr in
+			let sbyte_instr = m.mem.(instr_addr) in
+				begin match sbyte_instr with
+				| InsB0 (op,args) -> begin match op with
+														 | Negq | Addq | Subq | Imulq | Incq | Decq -> arith_instr m op args;
+																															m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
+														 | Notq | Andq | Orq | Xorq -> logic_instr m op args;
+																													m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
+														 | Sarq | Shlq | Shrq | Set _ -> bit_manipulation_instr m op args;
+																														m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
+														 | Leaq | Movq | Pushq | Popq -> data_move_instr m op args;
+																														m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
+														 | Cmpq | Jmp | Callq | Retq | J _ -> ctrl_cond_instr m op args;
+																																 m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
+														end
+				| InsFrag -> m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 1L
+  			| Byte b -> m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 1L
+				(*| _ -> failwith "Here is the problem"*)
+				end
+
 
 (* Runs the machine until the rip register reaches a designated
    memory address. Returns the contents of %rax when the 
