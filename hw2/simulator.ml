@@ -176,35 +176,79 @@ let map_addr_or_seg_fault (addr: quad) : int =
     - update the registers and/or memory appropriately
     - set the condition flags
 *)
-let get_src_dest (args: operand list) (index: int) (m: mach): int64 =
-	(*let x = List.nth args index in
-		begin match x with
-		| Imm i | Ind1 i -> begin match i with
-												| Lit l -> l
-												end
-		| Reg r | Ind2 r -> m.regs.(rind r)
-		| Ind3 (Lit l, r)  -> Int64.add (m.regs.(rind r)) l
-		| _ -> failwith "problem get_src_dest"
-		end*)
-	failwith "get unimplemented"
+let interp_opd (m: mach) (opd: operand): int64 =
+		begin match opd with
+		| Imm Lit l -> l
+		| Reg r -> m.regs.(rind r)
+		| Ind1 Lit l -> l
+		| Ind2 r -> m.regs.(rind r)
+		| Ind3 (Lit l, r) -> Int64.add m.regs.(rind r) l
+		| _ -> failwith "other opd unimplemented"
+		end
 
-let update_src_dest (args: operand list) (index: int) (new_value: int64) (m: mach): unit =
-	failwith "update unimplemented"
+let get_opd_info (m: mach) (args: operand list) (index: int): int64 =
+	let opd = List.nth args index in
+		interp_opd m opd
+	(*failwith "get_opd_info unimplemented"*)
 
-let arith_instr (m: mach) (op: opcode) (args: operand list) : unit =
-	(*begin match op with
-	| Negq -> let dest = get_src_dest args 0 m in
-							let new_dest = Int64_overflow.neg dest in
-								update_src_dest args 0 new_dest.value m
-	| Addq -> x
-	| Subq -> x
-	| Imulq -> x
-	| Incq -> x
-	| Decq -> x
-	end*)
-	failwith "arith_instr unimplemented"
+let update_reg_and_mem (m: mach) (args: operand list) (index: int) (new_info: int64): unit =
+	let target = List.nth args index in
+		begin match target with
+		| Imm i -> failwith "update reg imm problem"
+		| Reg r -> m.regs.(rind r) <- new_info
+		| _ -> failwith "update not implemented yet"
+		end
+	(*failwith "update_reg_and_mem unimplemented"*)
 
-let logic_instr (m: mach) (op: opcode) (args: operand list) : unit =
+let set_cnd_flags (f: flags) (data: Int64_overflow.t): unit =
+	f.fo <- data.overflow;
+	f.fs <- (Int64.shift_right_logical data.value 63) = 1L;
+	f.fz <- data.value = 0L;
+	print_endline (string_of_bool f.fo);
+	print_endline (string_of_bool f.fs);
+	print_endline (string_of_bool f.fz)
+	(*failwith "flags unimplemented"*)
+
+let arith_instr (m: mach) (op: opcode) (args: operand list): unit =
+	begin match op with
+	| Negq -> let dest = get_opd_info m args 0 in
+							let new_info = Int64_overflow.neg dest in
+								update_reg_and_mem m args 0 new_info.value;
+								set_cnd_flags m.flags new_info;
+								print_endline("Negq");
+	| Addq -> let src = get_opd_info m args 0 in
+							let dest = get_opd_info m args 1 in
+								let new_info = Int64_overflow.add dest src in
+									update_reg_and_mem m args 1 new_info.value;
+									set_cnd_flags m.flags new_info;
+									print_endline("Addq");
+	| Subq -> let src = get_opd_info m args 0 in
+							let dest = get_opd_info m args 1 in
+								let new_info = Int64_overflow.sub dest src in
+									update_reg_and_mem m args 1 new_info.value;
+									set_cnd_flags m.flags new_info;
+									print_endline("Subq");
+	| Imulq -> let src = get_opd_info m args 0 in
+						 	 let reg = get_opd_info m args 1 in
+								 let new_info = Int64_overflow.mul reg src in
+									update_reg_and_mem m args 1 new_info.value;
+									set_cnd_flags m.flags new_info;
+									print_endline("Imulq");
+	| Incq -> let src = get_opd_info m args 0 in
+							let new_info = Int64_overflow.succ src in
+								update_reg_and_mem m args 1 new_info.value;
+								set_cnd_flags m.flags new_info;
+								print_endline("Incq");
+	| Decq -> let src = get_opd_info m args 0 in
+							let new_info = Int64_overflow.pred src in
+								update_reg_and_mem m args 1 new_info.value;
+								set_cnd_flags m.flags new_info;
+								print_endline("Decq");
+	| _ -> ()
+	end
+	(*failwith "arith_instr unimplemented"*)
+
+let logic_instr (m: mach) (op: opcode) (args: operand list): unit =
 	(*begin match op with
 	| Notq -> let dest = get_src_dest args 0 m in
 							let new_dest = Int64.lognot dest in
@@ -215,7 +259,7 @@ let logic_instr (m: mach) (op: opcode) (args: operand list) : unit =
 	end*)
 	failwith "logic_instr unimplemented"
 
-let bit_manipulation_instr (m: mach) (op: opcode) (args: operand list) : unit =
+let bit_manipulation_instr (m: mach) (op: opcode) (args: operand list): unit =
 	(*begin match op with
 	| Sarq -> x
 	| Shlq -> x
@@ -225,15 +269,26 @@ let bit_manipulation_instr (m: mach) (op: opcode) (args: operand list) : unit =
 	failwith "bit_manipulation_instr unimplemented"
 
 let data_move_instr (m: mach) (op: opcode) (args: operand list) : unit =
-	(*begin match op with
-	| Leaq -> x
-	| Movq -> x
-	| Pushq -> x
-	| Popq -> x
-	end*)
-	failwith "data_move_instr unimplemented"
+	begin match op with
+	| Leaq -> let ind = interp_opd m (List.nth args 0) in
+								update_reg_and_mem m args 1 ind;
+								print_endline("Leaq");
+	| Movq -> let src = get_opd_info m args 0 in
+								print_endline("Movq");
+								update_reg_and_mem m args 1 src
+	| Pushq -> let src = get_opd_info m args 0 in
+								m.regs.(rind Rsp) <- Int64.sub m.regs.(rind Rsp) 8L;
+								update_reg_and_mem m ([Ind2 Rsp]) 0 src;
+								print_endline("Pushq");
+	| Popq -> let temp_val = get_opd_info m ([Ind2 Rsp]) 0 in
+							update_reg_and_mem m args 0 temp_val;
+							m.regs.(rind Rsp) <- Int64.add m.regs.(rind Rsp) 8L;
+							print_endline("Popq");
+	| _ -> ()
+	end
+	(*failwith "data_move_instr unimplemented"*)
 
-let ctrl_cond_instr (m: mach) (op: opcode) (args: operand list) : unit =
+let ctrl_cond_instr (m: mach) (op: opcode) (args: operand list): unit =
 	(*begin match op with
 	| Cmpq -> x
 	| Jmp -> x
@@ -249,21 +304,15 @@ let step (m:mach) : unit =
 			let sbyte_instr = m.mem.(instr_addr) in
 				begin match sbyte_instr with
 				| InsB0 (op,args) -> begin match op with
-														 | Negq | Addq | Subq | Imulq | Incq | Decq -> arith_instr m op args;
-																															m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
-														 | Notq | Andq | Orq | Xorq -> logic_instr m op args;
-																													m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
-														 | Sarq | Shlq | Shrq | Set _ -> bit_manipulation_instr m op args;
-																														m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
-														 | Leaq | Movq | Pushq | Popq -> data_move_instr m op args;
-																														m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
-														 | Cmpq | Jmp | Callq | Retq | J _ -> ctrl_cond_instr m op args;
-																																 m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
+														 | Negq | Addq | Subq | Imulq | Incq | Decq -> arith_instr m op args
+														 | Notq | Andq | Orq | Xorq -> logic_instr m op args
+														 | Sarq | Shlq | Shrq | Set _ -> bit_manipulation_instr m op args
+														 | Leaq | Movq | Pushq | Popq -> data_move_instr m op args
+														 | Cmpq | Jmp | Callq | Retq | J _ -> ctrl_cond_instr m op args
 														end
-				| InsFrag -> m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 1L
-  			| Byte b -> m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 1L
-				(*| _ -> failwith "Here is the problem"*)
+				| _ -> failwith "Here is the problem"
 				end
+
 
 
 (* Runs the machine until the rip register reaches a designated
