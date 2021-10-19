@@ -157,7 +157,7 @@ let interp_cnd {fo; fs; fz} : cnd -> bool =
    or None if the address is not within the legal address space. *)
 let map_addr (addr:quad) : int option =
  (* if the address is in the legal address space *)
- if addr >= mem_bot && addr <= mem_top then
+ if addr >= mem_bot && addr < mem_top then
   (* map it into the location with (int addr - int lowest) *)
   Some ((Int64.to_int addr) - (Int64.to_int mem_bot))
  (* else None *)
