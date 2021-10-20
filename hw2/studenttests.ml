@@ -24,6 +24,8 @@ let helloword_text_labels = [("foo", 0x400000L); ("main", 0x400018L)]
 let helloword_data_labels = [("baz", 0x400030L)]
 let helloword_labels = helloword_text_labels @ helloword_data_labels
 
+let simple_machine = Gradedtests.test_machine []
+
 let provided_tests : suite = [
   Test ("separate_segments", [
     ("separate_segments_1", assert_eqf (fun () -> separate_segments []) ([], []));
@@ -78,6 +80,19 @@ let provided_tests : suite = [
     ("assemble_data_elems_1", assert_eqf (fun () -> assemble_data_elems helloword_data_elems helloword_labels) Gradedtests.helloworld_dataseg);
     ("assemble_data_elems_2", assert_eqf (fun () -> assemble_data_elems [data "foo" [Quad (Lbl "bar")]] [("foo", 100L); ("bar", 108L)]) [Byte '\x6C'; Byte '\x00'; Byte '\x00'; Byte '\x00'; Byte '\x00'; Byte '\x00'; Byte '\x00'; Byte '\x00']);
     ("assemble_data_elems_3", (fun () -> try ignore (assemble_data_elems Gradedtests.helloworld helloword_labels); failwith "expecting Invalid_argument" with (Invalid_argument _) -> ()));
+  ]);
+
+  Test ("get_ind_mem_addr", [
+    ("get_ind_mem_addr_1", assert_eqf (fun () -> get_ind_mem_addr simple_machine (Ind1 (Lit 42L))) 42L);
+    ("get_ind_mem_addr_2", assert_eqf (fun () -> get_ind_mem_addr simple_machine (Ind2 Rip)) mem_bot);
+    ("get_ind_mem_addr_3", assert_eqf (fun () -> get_ind_mem_addr simple_machine (Ind3 (Lit 42L, Rip))) 0x40002AL);
+    ("get_ind_mem_addr_4", (fun () -> try ignore (get_ind_mem_addr simple_machine (Imm (Lit 42L))); failwith "expecting Invalid_argument" with (Invalid_argument _) -> ()));
+  ]);
+
+  Test ("get_opd_val", [
+    ("get_opd_val_1", assert_eqf (fun () -> get_opd_val simple_machine (Imm (Lit 42L))) 42L);
+    ("get_opd_val_2", assert_eqf (fun () -> get_opd_val simple_machine (Reg Rip)) mem_bot);
+    ("get_opd_val_3", assert_eqf (fun () -> get_opd_val simple_machine (Ind3 (Lit 0L, Rip))) 0L);
   ]);
 
 ] 

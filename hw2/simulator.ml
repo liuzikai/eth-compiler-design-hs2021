@@ -1,7 +1,7 @@
 (* X86lite Simulator *)
 
 (* See the documentation in the X86lite specification, available on the 
-   course web pages, for a detailed explanation of the instruction
+   course web pages, for a detailed explanation of the instuction
    semantics.
 *)
 
@@ -22,16 +22,16 @@ exception X86lite_segfault
 
 (* The simulator memory maps addresses to symbolic bytes.  Symbolic
    bytes are either actual data indicated by the Byte constructor or
-   'symbolic instructions' that take up eight bytes for the purposes of
+   'symbolic instuctions' that take up eight bytes for the purposes of
    layout.
 
    The symbolic bytes abstract away from the details of how
-   instructions are represented in memory.  Each instruction takes
+   instuctions are represented in memory.  Each instuction takes
    exactly eight consecutive bytes, where the first byte InsB0 stores
-   the actual instruction, and the next sevent bytes are InsFrag
+   the actual instuction, and the next sevent bytes are InsFrag
    elements, which aren't valid data.
 
-   For example, the two-instruction sequence:
+   For example, the two-instuction sequence:
         at&t syntax             ocaml syntax
       movq %rdi, (%rsp)       Movq,  [~%Rdi; Ind2 Rsp]
       decq %rdi               Decq,  [~%Rdi]
@@ -56,9 +56,9 @@ exception X86lite_segfault
        0x40000F :  InsFrag
        0x400010 :  InsFrag
 *)
-type sbyte = InsB0 of ins       (* 1st byte of an instruction *)
-           | InsFrag            (* 2nd - 8th bytes of an instruction *)
-           | Byte of char       (* non-instruction byte *)
+type sbyte = InsB0 of ins       (* 1st byte of an instuction *)
+           | InsFrag            (* 2nd - 8th bytes of an instuction *)
+           | Byte of char       (* non-instuction byte *)
 
 (* memory maps addresses to symbolic bytes *)
 type mem = sbyte array
@@ -115,7 +115,7 @@ let sbytes_of_string (s:string) : sbyte list =
   in
   loop [Byte '\x00'] @@ String.length s - 1
 
-(* Serialize an instruction to sbytes *)
+(* Serialize an instuction to sbytes *)
 let sbytes_of_ins (op, args:ins) : sbyte list =
   let check = function
     | Imm (Lbl _) | Ind1 (Lbl _) | Ind3 (Lbl _, _) -> 
@@ -145,23 +145,23 @@ let debug_simulator = ref false
 (* Interpret a condition code with respect to the given flags. *)
 let interp_cnd {fo; fs; fz} : cnd -> bool =
   fun x -> begin match x with
-          | Eq -> fz
-          | Neq -> not fz
-          | Lt -> fs != fo
-          | Le -> (fs != fo) || fz
-          | Gt -> not ((fs != fo) || fz)
-          | Ge -> fs = fo
-          end
+    | Eq -> fz
+    | Neq -> not fz
+    | Lt -> fs != fo
+    | Le -> (fs != fo) || fz
+    | Gt -> not ((fs != fo) || fz)
+    | Ge -> fs = fo
+  end
 
 (* Maps an X86lite address into Some OCaml array index,
    or None if the address is not within the legal address space. *)
 let map_addr (addr:quad) : int option =
- (* if the address is in the legal address space *)
- if addr >= mem_bot && addr < mem_top then
-  (* map it into the location with (int addr - int lowest) *)
-  Some ((Int64.to_int addr) - (Int64.to_int mem_bot))
- (* else None *)
- else None
+  (* if the address is in the legal address space *)
+  if addr >= mem_bot && addr < mem_top then
+    (* map it into the location with (addr - lowest) *)
+    Some (Int64.to_int (Int64.sub addr mem_bot))
+  (* else return None *)
+  else None
 
 (* Wrapper function for map_addr *)
 let map_addr_or_seg_fault (addr: quad) : int =
@@ -170,85 +170,72 @@ let map_addr_or_seg_fault (addr: quad) : int =
     | None -> raise X86lite_segfault
 
 (* Simulates one step of the machine:
-    - fetch the instruction at %rip
+    - fetch the instuction at %rip
     - compute the source and/or destination information from the operands
-    - simulate the instruction semantics
+    - simulate the instuction semantics
     - update the registers and/or memory appropriately
     - set the condition flags
 *)
-let interp_opd (m: mach) (opd: operand): int64 =
-		begin match opd with
-		| Imm Lit l -> l
-		| Reg r -> m.regs.(rind r)
-		| Ind1 Lit l -> l
-		| Ind2 r -> m.regs.(rind r)
-		| Ind3 (Lit l, r) -> Int64.add m.regs.(rind r) l
-		| _ -> failwith "other opd unimplemented"
-		end
 
-let get_opd_info (m: mach) (args: operand list) (index: int): int64 =
-	let opd = List.nth args index in
-		interp_opd m opd
-	(*failwith "get_opd_info unimplemented"*)
+let get_ind_mem_addr (m: mach) (opd: operand) : int64 =
+  match opd with
+  | Ind1 Lit l -> l
+  | Ind2 r -> m.regs.(rind r)
+  | Ind3 (Lit l, r) -> Int64.add m.regs.(rind r) l
+  | _ -> invalid_arg "get_opd_mem_addr: expecting Ind operand"
 
-let update_reg_and_mem (m: mach) (args: operand list) (index: int) (new_info: int64): unit =
-	let target = List.nth args index in
-		begin match target with
-		| Imm i -> failwith "update reg imm problem"
-		| Reg r -> m.regs.(rind r) <- new_info
-		| _ -> failwith "update not implemented yet"
-		end
-	(*failwith "update_reg_and_mem unimplemented"*)
+let get_opd_val (m: mach) (opd: operand) : int64 =
+  match opd with
+  | Imm Lit l -> l
+  | Reg r -> m.regs.(rind r)
+  | _ -> int64_of_sbytes (Array.to_list (
+      Array.sub m.mem (map_addr_or_seg_fault (get_ind_mem_addr m opd)) 8
+    ))
 
-let set_cnd_flags (f: flags) (data: Int64_overflow.t): unit =
-	f.fo <- data.overflow;
-	f.fs <- (Int64.shift_right_logical data.value 63) = 1L;
-	f.fz <- data.value = 0L;
-	print_endline (string_of_bool f.fo);
-	print_endline (string_of_bool f.fs);
-	print_endline (string_of_bool f.fz)
-	(*failwith "flags unimplemented"*)
+let update_reg_or_mem (m: mach) (opd: operand) (new_val: int64) : unit =
+  (* debug*) if false then print_endline("new_val = " ^ Int64.to_string new_val);
+	match opd with
+  | Imm _ -> failwith "update_reg_or_mem: cannot write to Imm"
+  | Reg r -> m.regs.(rind r) <- new_val
+  | _ -> (
+    let mem_addr = get_ind_mem_addr m opd in
+    let mem_idx = map_addr_or_seg_fault mem_addr in
+    let val_sbytes = Array.of_list (sbytes_of_int64 new_val) in
+    Array.blit val_sbytes 0 m.mem mem_idx 8
+  )
 
-let arith_instr (m: mach) (op: opcode) (args: operand list): unit =
-	begin match op with
-	| Negq -> let dest = get_opd_info m args 0 in
-							let new_info = Int64_overflow.neg dest in
-								update_reg_and_mem m args 0 new_info.value;
-								set_cnd_flags m.flags new_info;
-								print_endline("Negq");
-	| Addq -> let src = get_opd_info m args 0 in
-							let dest = get_opd_info m args 1 in
-								let new_info = Int64_overflow.add dest src in
-									update_reg_and_mem m args 1 new_info.value;
-									set_cnd_flags m.flags new_info;
-									print_endline("Addq");
-	| Subq -> let src = get_opd_info m args 0 in
-							let dest = get_opd_info m args 1 in
-								let new_info = Int64_overflow.sub dest src in
-									update_reg_and_mem m args 1 new_info.value;
-									set_cnd_flags m.flags new_info;
-									print_endline("Subq");
-	| Imulq -> let src = get_opd_info m args 0 in
-						 	 let reg = get_opd_info m args 1 in
-								 let new_info = Int64_overflow.mul reg src in
-									update_reg_and_mem m args 1 new_info.value;
-									set_cnd_flags m.flags new_info;
-									print_endline("Imulq");
-	| Incq -> let src = get_opd_info m args 0 in
-							let new_info = Int64_overflow.succ src in
-								update_reg_and_mem m args 1 new_info.value;
-								set_cnd_flags m.flags new_info;
-								print_endline("Incq");
-	| Decq -> let src = get_opd_info m args 0 in
-							let new_info = Int64_overflow.pred src in
-								update_reg_and_mem m args 1 new_info.value;
-								set_cnd_flags m.flags new_info;
-								print_endline("Decq");
-	| _ -> ()
-	end
-	(*failwith "arith_instr unimplemented"*)
+let arith_inst (m: mach) (op: opcode) (args: operand list): unit =
+  let op1: operand = List.nth args 0 in
+  let op1_val: int64 = get_opd_val m op1 in
+  let dest, result = match op with
+    (* Single operand *)
+    | Negq -> (op1, Int64_overflow.neg op1_val)
+    | Incq -> (op1, Int64_overflow.succ op1_val)
+    | Decq -> (op1, Int64_overflow.pred op1_val)
+    (* Two operands *)
+    | _ -> (
+      let op2: operand = List.nth args 1 in
+      let op2_val: int64 = get_opd_val m op2 in
+      match op with
+      | Addq  -> (op2, Int64_overflow.add op2_val op1_val)
+      | Subq  -> (op2, Int64_overflow.sub op2_val op1_val)
+      | Imulq -> (op2, Int64_overflow.mul op2_val op1_val)
+      | _ -> failwith "arith_inst: unexpected match"
+      (* here is not reached *)
+    )
+  in
+  update_reg_or_mem m dest result.value;
+  (* Set cnd flags based on result *)
+  m.flags.fo <- result.overflow;
+	m.flags.fs <- (result.value < 0L);
+	m.flags.fz <- (result.value = 0L);
+	(* debug *) if false then print_endline("O S Z = "
+	                            ^ (if m.flags.fo then "true " else "false ")
+	                            ^ (if m.flags.fs then "true " else "false ")
+	                            ^ (if m.flags.fz then "true " else "false "))
 
-let logic_instr (m: mach) (op: opcode) (args: operand list): unit =
+
+let logic_inst (m: mach) (op: opcode) (args: operand list): unit =
 	(*begin match op with
 	| Notq -> let dest = get_src_dest args 0 m in
 							let new_dest = Int64.lognot dest in
@@ -257,38 +244,33 @@ let logic_instr (m: mach) (op: opcode) (args: operand list): unit =
 	| Orq -> x
 	| Xorq -> x
 	end*)
-	failwith "logic_instr unimplemented"
+	failwith "logic_inst unimplemented"
 
-let bit_manipulation_instr (m: mach) (op: opcode) (args: operand list): unit =
+let bit_manipulation_inst (m: mach) (op: opcode) (args: operand list): unit =
 	(*begin match op with
 	| Sarq -> x
 	| Shlq -> x
 	| Shrq -> x
 	| Set _ -> x
 	end*)
-	failwith "bit_manipulation_instr unimplemented"
+	failwith "bit_manipulation_inst unimplemented"
 
-let data_move_instr (m: mach) (op: opcode) (args: operand list) : unit =
-	begin match op with
-	| Leaq -> let ind = interp_opd m (List.nth args 0) in
-								update_reg_and_mem m args 1 ind;
-								print_endline("Leaq");
-	| Movq -> let src = get_opd_info m args 0 in
-								print_endline("Movq");
-								update_reg_and_mem m args 1 src
-	| Pushq -> let src = get_opd_info m args 0 in
-								m.regs.(rind Rsp) <- Int64.sub m.regs.(rind Rsp) 8L;
-								update_reg_and_mem m ([Ind2 Rsp]) 0 src;
-								print_endline("Pushq");
-	| Popq -> let temp_val = get_opd_info m ([Ind2 Rsp]) 0 in
-							update_reg_and_mem m args 0 temp_val;
-							m.regs.(rind Rsp) <- Int64.add m.regs.(rind Rsp) 8L;
-							print_endline("Popq");
-	| _ -> ()
-	end
-	(*failwith "data_move_instr unimplemented"*)
+let data_move_inst (m: mach) (op: opcode) (args: operand list) : unit =
+	match op with
+	| Leaq -> let ind_addr = get_ind_mem_addr m (List.nth args 0) in
+            update_reg_or_mem m (List.nth args 1) ind_addr;
+	| Movq -> let src_val = get_opd_val m (List.nth args 0) in
+            update_reg_or_mem m (List.nth args 1) src_val
+	| Pushq -> let src_val = get_opd_val m (List.nth args 0) in
+             m.regs.(rind Rsp) <- Int64.sub m.regs.(rind Rsp) 8L;
+             update_reg_or_mem m (Ind2 Rsp) src_val;
+	| Popq -> let mem_val = get_opd_val m (Ind2 Rsp) in
+            update_reg_or_mem m (List.nth args 0) mem_val;
+            m.regs.(rind Rsp) <- Int64.add m.regs.(rind Rsp) 8L;
+	| _ -> failwith "data_move_inst: unexpected op"
+	(* here is not reached *)
 
-let ctrl_cond_instr (m: mach) (op: opcode) (args: operand list): unit =
+let ctrl_cond_inst (m: mach) (op: opcode) (args: operand list): unit =
 	(*begin match op with
 	| Cmpq -> x
 	| Jmp -> x
@@ -296,23 +278,22 @@ let ctrl_cond_instr (m: mach) (op: opcode) (args: operand list): unit =
 	| Retq -> x
 	| J _ -> x
 	end*)
-	failwith "ctrl_cond_instr unimplemented"
+	failwith "ctrl_cond_inst unimplemented"
 
 let step (m:mach) : unit =
-	let fetch_instr = m.regs.(rind Rip) in
-		let instr_addr = map_addr_or_seg_fault fetch_instr in
-			let sbyte_instr = m.mem.(instr_addr) in
-				begin match sbyte_instr with
-				| InsB0 (op,args) -> begin match op with
-														 | Negq | Addq | Subq | Imulq | Incq | Decq -> arith_instr m op args
-														 | Notq | Andq | Orq | Xorq -> logic_instr m op args
-														 | Sarq | Shlq | Shrq | Set _ -> bit_manipulation_instr m op args
-														 | Leaq | Movq | Pushq | Popq -> data_move_instr m op args
-														 | Cmpq | Jmp | Callq | Retq | J _ -> ctrl_cond_instr m op args
-														end
-				| _ -> failwith "Here is the problem"
-				end
-
+	let rip_val = m.regs.(rind Rip) in
+  let inst = m.mem.(map_addr_or_seg_fault rip_val) in
+  m.regs.(rind Rip) <- Int64.add rip_val 8L;
+	match inst with
+  | InsB0 (op, args) -> (
+    match op with
+     | Negq | Addq | Subq | Imulq | Incq | Decq -> arith_inst m op args
+     | Notq | Andq | Orq | Xorq -> logic_inst m op args
+     | Sarq | Shlq | Shrq | Set _ -> bit_manipulation_inst m op args
+     | Leaq | Movq | Pushq | Popq -> data_move_inst m op args
+     | Cmpq | Jmp | Callq | Retq | J _ -> ctrl_cond_inst m op args
+    )
+  | _ -> failwith "Here is the problem"
 
 
 (* Runs the machine until the rip register reaches a designated
@@ -407,7 +388,7 @@ let replace_labels_in_operand (op: operand) (lookup: (lbl * quad) list) : operan
     | other -> other
 
 
-(* Replace label in a single instruction *)
+(* Replace label in a single instuction *)
 let replace_labels_in_ins (op, args) (lookup: (lbl * quad) list) : ins =
   let replace_labels_in_operand_fold_left (ret: operand list) (arg: operand) : operand list (* reversed *) =
     (replace_labels_in_operand arg lookup) :: ret
@@ -470,7 +451,7 @@ let assemble_data_elems (dl: elem list) (lookup: (lbl * quad) list) : sbyte list
       Note: the size of an Asciz string section is (1 + the string length)
             due to the null terminator
 
-   - resolve the labels to concrete addresses and 'patch' the instructions to
+   - resolve the labels to concrete addresses and 'patch' the instuctions to
      replace Lbl values with the corresponding Imm values.
 
    - the text segment starts at the lowest address
