@@ -248,8 +248,9 @@ let logic_inst (m: mach) (op: opcode) (args: operand list): unit =
 			)
 	in
 	update_reg_or_mem m dest result;
-	(* Set cnd flags based on result *)
-	update_flags m.flags result false
+	match op with
+    | Notq -> ()
+    | _ -> update_flags m.flags result false
 
 let bit_manipulation_inst (m: mach) (op: opcode) (args: operand list): unit =
 	match op with
@@ -273,6 +274,7 @@ let bit_manipulation_inst (m: mach) (op: opcode) (args: operand list): unit =
 				 | Shrq -> let result = Int64.shift_right_logical dest_val amt_val in
 									 update_reg_or_mem m dest result;
 									 if amt_val = 0 then () else update_flags m.flags result (result < 0L)
+				 | _ -> failwith "bit_manipulation_inst: unexpected op"
 
 let data_move_inst (m: mach) (op: opcode) (args: operand list) : unit =
 	match op with
