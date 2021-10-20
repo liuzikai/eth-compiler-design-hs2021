@@ -258,10 +258,10 @@ let bit_manipulation_inst (m: mach) (op: opcode) (args: operand list): unit =
 	match op with
 	| Set cc -> let op = List.nth args 0 in
 							let op_val = get_opd_val m op in
-							let clear_val = Int64.logand op_val 0x00L in
+							let clear_val = Int64.logand op_val 0xFFFFFFFFFFFFFF00L in
 							if interp_cnd m.flags cc
 							then update_reg_or_mem m op (Int64.add clear_val 1L)
-							else update_reg_or_mem m op (Int64.add clear_val 0L)
+							else update_reg_or_mem m op clear_val
 	| _ -> let amt = List.nth args 0 in
 				 let amt_val = Int64.to_int (get_opd_val m amt) in
 				 let dest = List.nth args 1 in

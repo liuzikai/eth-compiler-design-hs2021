@@ -570,7 +570,7 @@ let parse_int = [
 ]
 
 let provided_tests : suite = provided_tests @ [
-  Test ("Debug: End-to-end Tests", [
+  Test ("Debug: End-to-end Parse_Int", [
     ("parse_int", Gradedtests.program_test parse_int 0xECE1L)
   ]);
 ]
