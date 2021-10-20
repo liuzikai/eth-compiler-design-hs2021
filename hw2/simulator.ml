@@ -198,6 +198,11 @@ let update_reg_or_mem (m: mach) (opd: operand) (new_val: int64) : unit =
     Array.blit val_sbytes 0 m.mem mem_idx 8
   )
 
+let update_flags (f: flags) (result: int64) (fo: bool): unit =
+	f.fo <- fo;
+	f.fs <- (result < 0L);
+	f.fz <- (result = 0L)
+
 let arith_inst (m: mach) (op: opcode) (args: operand list): unit =
   let op1: operand = List.nth args 0 in
   let op1_val: int64 = get_opd_val m op1 in
@@ -220,9 +225,7 @@ let arith_inst (m: mach) (op: opcode) (args: operand list): unit =
   in
   update_reg_or_mem m dest result.value;
   (* Set cnd flags based on result *)
-  m.flags.fo <- result.overflow;
-	m.flags.fs <- (result.value < 0L);
-	m.flags.fz <- (result.value = 0L);
+	update_flags m.flags result.value result.overflow;
 	(* debug *) if false then print_endline("O S Z = "
 	                            ^ (if m.flags.fo then "true " else "false ")
 	                            ^ (if m.flags.fs then "true " else "false ")
@@ -246,18 +249,30 @@ let logic_inst (m: mach) (op: opcode) (args: operand list): unit =
 	in
 	update_reg_or_mem m dest result;
 	(* Set cnd flags based on result *)
-  m.flags.fo <- false;
-	m.flags.fs <- (result < 0L);
-	m.flags.fz <- (result = 0L)
+	update_flags m.flags result false
 
 let bit_manipulation_inst (m: mach) (op: opcode) (args: operand list): unit =
-	(*begin match op with
-	| Sarq -> x
-	| Shlq -> x
-	| Shrq -> x
-	| Set _ -> x
-	end*)
-	failwith "bit_manipulation_inst unimplemented"
+	match op with
+	| Set cc -> let op = List.nth args 0 in
+							let op_val = get_opd_val m op in
+							let clear_val = Int64.logand op_val 0x00L in
+							if interp_cnd m.flags cc
+							then update_reg_or_mem m op (Int64.add clear_val 1L)
+							else update_reg_or_mem m op (Int64.add clear_val 0L)
+	| _ -> let amt = List.nth args 0 in
+				 let amt_val = Int64.to_int (get_opd_val m amt) in
+				 let dest = List.nth args 1 in
+				 let dest_val = get_opd_val m dest in
+				 match op with
+				 | Sarq -> let result = Int64.shift_right dest_val amt_val in
+									 update_reg_or_mem m dest result;
+									 if amt_val = 0 then () else update_flags m.flags result false
+				 | Shlq -> let result = Int64.shift_left dest_val amt_val in
+									 update_reg_or_mem m dest result;
+									 if amt_val = 0 then () else update_flags m.flags result true
+				 | Shrq -> let result = Int64.shift_right_logical dest_val amt_val in
+									 update_reg_or_mem m dest result;
+									 if amt_val = 0 then () else update_flags m.flags result (result < 0L)
 
 let data_move_inst (m: mach) (op: opcode) (args: operand list) : unit =
 	match op with
@@ -275,26 +290,26 @@ let data_move_inst (m: mach) (op: opcode) (args: operand list) : unit =
 	(* here is not reached *)
 
 let ctrl_cond_inst (m: mach) (op: opcode) (args: operand list): unit =
-	let op1: operand = List.nth args 0 in
-	let op1_val: int64 = get_opd_val m op1 in
 	match op with
-	| Jmp -> 	m.regs.(rind Rip) <- op1_val;
-	| Callq -> data_move_inst m Pushq [Reg Rip];
-						 m.regs.(rind Rip) <- op1_val;
 	| Retq -> data_move_inst m Popq [Reg Rip];
-	| _ -> let op2 = List.nth args 1 in
-				 let op2_val = get_opd_val m op2 in
-				 match op with
-				| Cmpq -> let result = Int64_overflow.sub op2_val op1_val in
-									m.flags.fo <- result.overflow;
-									m.flags.fs <- (result.value < 0L);
-									m.flags.fz <- (result.value = 0L);
-				| J cc -> if interp_cnd {fo = m.flags.fo;
-															   fs = m.flags.fs;
-															   fz = m.flags.fz} cc
-							 	  then m.regs.(rind Rip) <- op2_val
-							 	  else m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
-				| _ -> failwith "ctrl_cond_inst unimplemented"
+	| _ -> (
+	  let op1: operand = List.nth args 0 in
+    let op1_val: int64 = get_opd_val m op1 in
+    match op with
+    | Jmp -> 	m.regs.(rind Rip) <- op1_val;
+    | Callq -> data_move_inst m Pushq [Reg Rip];
+               m.regs.(rind Rip) <- op1_val;
+    | J cc -> if interp_cnd m.flags cc
+              then m.regs.(rind Rip) <- op1_val
+    | _ -> let op2 = List.nth args 1 in
+           let op2_val = get_opd_val m op2 in
+           match op with
+          | Cmpq -> let result = Int64_overflow.sub op2_val op1_val in
+                    m.flags.fo <- result.overflow;
+                    m.flags.fs <- (result.value < 0L);
+                    m.flags.fz <- (result.value = 0L);
+          | _ -> failwith "ctrl_cond_inst: unexpected op"
+	)
 
 let step (m:mach) : unit =
 	let rip_val = m.regs.(rind Rip) in
@@ -404,7 +419,7 @@ let replace_labels_in_operand (op: operand) (lookup: (lbl * quad) list) : operan
     | other -> other
 
 
-(* Replace label in a single instuction *)
+(* Replace label in a single instruction *)
 let replace_labels_in_ins (op, args) (lookup: (lbl * quad) list) : ins =
   let replace_labels_in_operand_fold_left (ret: operand list) (arg: operand) : operand list (* reversed *) =
     (replace_labels_in_operand arg lookup) :: ret
