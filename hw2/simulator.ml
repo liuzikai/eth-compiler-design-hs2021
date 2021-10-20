@@ -267,13 +267,21 @@ let bit_manipulation_inst (m: mach) (op: opcode) (args: operand list): unit =
 				 match op with
 				 | Sarq -> let result = Int64.shift_right dest_val amt_val in
 									 update_reg_or_mem m dest result;
-									 if amt_val = 0 then () else update_flags m.flags result false
+									 if amt_val = 0 then () else update_flags m.flags result m.flags.fo;
+								   if amt_val = 1 then m.flags.fo <- false else ()
 				 | Shlq -> let result = Int64.shift_left dest_val amt_val in
 									 update_reg_or_mem m dest result;
-									 if amt_val = 0 then () else update_flags m.flags result true
+									 let first_most_sign = (Int64.shift_right_logical dest_val 63 = 1L) in
+								   let second_most_sign = (Int64.shift_right_logical dest_val 62 = 1L) in
+									 if amt_val = 0 then () else update_flags m.flags result m.flags.fo;
+									 if amt_val = 1 then (if first_most_sign = second_most_sign then m.flags.fo <- false
+																				else m.flags.fo <- true) else ()
 				 | Shrq -> let result = Int64.shift_right_logical dest_val amt_val in
 									 update_reg_or_mem m dest result;
-									 if amt_val = 0 then () else update_flags m.flags result (result < 0L)
+									 if amt_val = 0 then () else (m.flags.fs <- (result < 0L);
+																							  if (result = 0L) then m.flags.fz <- true
+																								else m.flags.fz <- false);
+									 if amt_val = 1 then m.flags.fo <- (dest_val < 0L) else ()
 				 | _ -> failwith "bit_manipulation_inst: unexpected op"
 
 let data_move_inst (m: mach) (op: opcode) (args: operand list) : unit =
