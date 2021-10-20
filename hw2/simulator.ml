@@ -1,6 +1,6 @@
 (* X86lite Simulator *)
 
-(* See the documentation in the X86lite specification, available on the 
+(* See the documentation in the X86lite specification, available on the
    course web pages, for a detailed explanation of the instuction
    semantics.
 *)
@@ -24,21 +24,17 @@ exception X86lite_segfault
    bytes are either actual data indicated by the Byte constructor or
    'symbolic instuctions' that take up eight bytes for the purposes of
    layout.
-
    The symbolic bytes abstract away from the details of how
    instuctions are represented in memory.  Each instuction takes
    exactly eight consecutive bytes, where the first byte InsB0 stores
    the actual instuction, and the next sevent bytes are InsFrag
    elements, which aren't valid data.
-
    For example, the two-instuction sequence:
         at&t syntax             ocaml syntax
       movq %rdi, (%rsp)       Movq,  [~%Rdi; Ind2 Rsp]
       decq %rdi               Decq,  [~%Rdi]
-
    is represented by the following elements of the mem array (starting
    at address 0x400000):
-
        0x400000 :  InsB0 (Movq,  [~%Rdi; Ind2 Rsp])
        0x400001 :  InsFrag
        0x400002 :  InsFrag
@@ -92,7 +88,7 @@ let rind : reg -> int = function
 
 (* Convert an int64 to its sbyte representation *)
 let sbytes_of_int64 (i:int64) : sbyte list =
-  let open Char in 
+  let open Char in
   let open Int64 in
   List.map (fun n -> Byte (shift_right i n |> logand 0xffL |> to_int |> chr))
            [0; 8; 16; 24; 32; 40; 48; 56]
@@ -118,7 +114,7 @@ let sbytes_of_string (s:string) : sbyte list =
 (* Serialize an instuction to sbytes *)
 let sbytes_of_ins (op, args:ins) : sbyte list =
   let check = function
-    | Imm (Lbl _) | Ind1 (Lbl _) | Ind3 (Lbl _, _) -> 
+    | Imm (Lbl _) | Ind1 (Lbl _) | Ind3 (Lbl _, _) ->
       invalid_arg "sbytes_of_ins: tried to serialize a label!"
     | o -> ()
   in
@@ -133,12 +129,10 @@ let sbytes_of_data : data -> sbyte list = function
   | Quad (Lbl _) -> invalid_arg "sbytes_of_data: tried to serialize a label!"
 
 
-(* It might be useful to toggle printing of intermediate states of your 
+(* It might be useful to toggle printing of intermediate states of your
    simulator. Our implementation uses this mutable flag to turn on/off
    printing.  For instance, you might write something like:
-
      [if !debug_simulator then print_endline @@ string_of_ins u; ...]
-
 *)
 let debug_simulator = ref false
 
@@ -236,15 +230,25 @@ let arith_inst (m: mach) (op: opcode) (args: operand list): unit =
 
 
 let logic_inst (m: mach) (op: opcode) (args: operand list): unit =
-	(*begin match op with
-	| Notq -> let dest = get_src_dest args 0 m in
-							let new_dest = Int64.lognot dest in
-								update_src_dest args 0 new_dest m
-	| Andq -> x
-	| Orq -> x
-	| Xorq -> x
-	end*)
-	failwith "logic_inst unimplemented"
+	let op1: operand = List.nth args 0 in
+	let op1_val: int64 = get_opd_val m op1 in
+	let dest, result = match op with
+		| Notq -> (op1, Int64.lognot op1_val)
+		| _ -> (
+			let op2: operand = List.nth args 1 in
+			let op2_val: int64 = get_opd_val m op2 in
+			match op with
+			| Andq -> (op2, Int64.logand op2_val op1_val)
+			| Orq -> (op2, Int64.logor op2_val op1_val)
+			| Xorq -> (op2, Int64.logxor op2_val op1_val)
+			| _ -> failwith "logic_inst: unexpected match"
+			)
+	in
+	update_reg_or_mem m dest result;
+	(* Set cnd flags based on result *)
+  m.flags.fo <- false;
+	m.flags.fs <- (result < 0L);
+	m.flags.fz <- (result = 0L)
 
 let bit_manipulation_inst (m: mach) (op: opcode) (args: operand list): unit =
 	(*begin match op with
@@ -271,14 +275,26 @@ let data_move_inst (m: mach) (op: opcode) (args: operand list) : unit =
 	(* here is not reached *)
 
 let ctrl_cond_inst (m: mach) (op: opcode) (args: operand list): unit =
-	(*begin match op with
-	| Cmpq -> x
-	| Jmp -> x
-	| Callq -> x
-	| Retq -> x
-	| J _ -> x
-	end*)
-	failwith "ctrl_cond_inst unimplemented"
+	let op1: operand = List.nth args 0 in
+	let op1_val: int64 = get_opd_val m op1 in
+	match op with
+	| Jmp -> 	m.regs.(rind Rip) <- op1_val;
+	| Callq -> data_move_inst m Pushq [Reg Rip];
+						 m.regs.(rind Rip) <- op1_val;
+	| Retq -> data_move_inst m Popq [Reg Rip];
+	| _ -> let op2 = List.nth args 1 in
+				 let op2_val = get_opd_val m op2 in
+				 match op with
+				| Cmpq -> let result = Int64_overflow.sub op2_val op1_val in
+									m.flags.fo <- result.overflow;
+									m.flags.fs <- (result.value < 0L);
+									m.flags.fz <- (result.value = 0L);
+				| J cc -> if interp_cnd {fo = m.flags.fo;
+															   fs = m.flags.fs;
+															   fz = m.flags.fz} cc
+							 	  then m.regs.(rind Rip) <- op2_val
+							 	  else m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
+				| _ -> failwith "ctrl_cond_inst unimplemented"
 
 let step (m:mach) : unit =
 	let rip_val = m.regs.(rind Rip) in
@@ -297,9 +313,9 @@ let step (m:mach) : unit =
 
 
 (* Runs the machine until the rip register reaches a designated
-   memory address. Returns the contents of %rax when the 
+   memory address. Returns the contents of %rax when the
    machine halts. *)
-let run (m:mach) : int64 = 
+let run (m:mach) : int64 =
   while m.regs.(rind Rip) <> exit_addr do step m done;
   m.regs.(rind Rax)
 
@@ -352,7 +368,7 @@ let calc_label_addresses (start: quad) (p: prog) : ((lbl * quad) list * quad) =
     match p with
       | [] -> (ret, data_start)
       | h :: t -> (
-        if List.exists (fun (l, _) : bool -> (l = h.lbl)) ret then
+        if List.exists (fun (l, _) -> (l = h.lbl)) ret then
           raise (Redefined_sym h.lbl)
         else
           let asm_len: quad = Int64.mul 8L (Int64.of_int (
@@ -450,13 +466,10 @@ let assemble_data_elems (dl: elem list) (lookup: (lbl * quad) list) : sbyte list
    - compute the size of each segment
       Note: the size of an Asciz string section is (1 + the string length)
             due to the null terminator
-
    - resolve the labels to concrete addresses and 'patch' the instuctions to
      replace Lbl values with the corresponding Imm values.
-
    - the text segment starts at the lowest address
    - the data segment starts after the text segment
-
   HINT: List.fold_left and List.fold_right are your friends.
  *)
 let assemble (p:prog) : exec =
@@ -469,20 +482,19 @@ let assemble (p:prog) : exec =
    ; data_seg = assemble_data_elems data_elems lookup
   }
 
-(* Convert an object file into an executable machine state. 
+(* Convert an object file into an executable machine state.
     - allocate the mem array
-    - set up the memory state by writing the symbolic bytes to the 
-      appropriate locations 
+    - set up the memory state by writing the symbolic bytes to the
+      appropriate locations
     - create the initial register state
       - initialize rip to the entry point address
-      - initializes rsp to the last word in memory 
+      - initializes rsp to the last word in memory
       - the other registers are initialized to 0
     - the condition code flags start as 'false'
-
-  Hint: The Array.make, Array.blit, and Array.of_list library functions 
+  Hint: The Array.make, Array.blit, and Array.of_list library functions
   may be of use.
 *)
-let load {entry; text_pos; data_pos; text_seg; data_seg} : mach = 
+let load {entry; text_pos; data_pos; text_seg; data_seg} : mach =
   let m = {
     flags = { fo = false; fs = false; fz = false };
     regs = Array.make nregs 0L;
