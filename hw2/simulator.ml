@@ -275,26 +275,26 @@ let data_move_inst (m: mach) (op: opcode) (args: operand list) : unit =
 	(* here is not reached *)
 
 let ctrl_cond_inst (m: mach) (op: opcode) (args: operand list): unit =
-	let op1: operand = List.nth args 0 in
-	let op1_val: int64 = get_opd_val m op1 in
 	match op with
-	| Jmp -> 	m.regs.(rind Rip) <- op1_val;
-	| Callq -> data_move_inst m Pushq [Reg Rip];
-						 m.regs.(rind Rip) <- op1_val;
 	| Retq -> data_move_inst m Popq [Reg Rip];
-	| _ -> let op2 = List.nth args 1 in
-				 let op2_val = get_opd_val m op2 in
-				 match op with
-				| Cmpq -> let result = Int64_overflow.sub op2_val op1_val in
-									m.flags.fo <- result.overflow;
-									m.flags.fs <- (result.value < 0L);
-									m.flags.fz <- (result.value = 0L);
-				| J cc -> if interp_cnd {fo = m.flags.fo;
-															   fs = m.flags.fs;
-															   fz = m.flags.fz} cc
-							 	  then m.regs.(rind Rip) <- op2_val
-							 	  else m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
-				| _ -> failwith "ctrl_cond_inst unimplemented"
+	| _ -> (
+	  let op1: operand = List.nth args 0 in
+    let op1_val: int64 = get_opd_val m op1 in
+    match op with
+    | Jmp -> 	m.regs.(rind Rip) <- op1_val;
+    | Callq -> data_move_inst m Pushq [Reg Rip];
+               m.regs.(rind Rip) <- op1_val;
+    | J cc -> if interp_cnd m.flags cc
+              then m.regs.(rind Rip) <- op1_val
+    | _ -> let op2 = List.nth args 1 in
+           let op2_val = get_opd_val m op2 in
+           match op with
+          | Cmpq -> let result = Int64_overflow.sub op2_val op1_val in
+                    m.flags.fo <- result.overflow;
+                    m.flags.fs <- (result.value < 0L);
+                    m.flags.fz <- (result.value = 0L);
+          | _ -> failwith "ctrl_cond_inst: unexpected op"
+	)
 
 let step (m:mach) : unit =
 	let rip_val = m.regs.(rind Rip) in
@@ -404,7 +404,7 @@ let replace_labels_in_operand (op: operand) (lookup: (lbl * quad) list) : operan
     | other -> other
 
 
-(* Replace label in a single instuction *)
+(* Replace label in a single instruction *)
 let replace_labels_in_ins (op, args) (lookup: (lbl * quad) list) : ins =
   let replace_labels_in_operand_fold_left (ret: operand list) (arg: operand) : operand list (* reversed *) =
     (replace_labels_in_operand arg lookup) :: ret
