@@ -225,11 +225,11 @@ let arith_inst (m: mach) (op: opcode) (args: operand list): unit =
   in
   update_reg_or_mem m dest result.value;
   (* Set cnd flags based on result *)
-	update_flags m.flags result.value result.overflow;
-	(* debug *) if false then print_endline("O S Z = "
-	                            ^ (if m.flags.fo then "true " else "false ")
-	                            ^ (if m.flags.fs then "true " else "false ")
-	                            ^ (if m.flags.fz then "true " else "false "))
+  update_flags m.flags result.value result.overflow;
+  (* debug *) if false then print_endline("O S Z = "
+                               ^ (if m.flags.fo then "true " else "false ")
+                               ^ (if m.flags.fs then "true " else "false ")
+                               ^ (if m.flags.fz then "true " else "false "))
 
 
 let logic_inst (m: mach) (op: opcode) (args: operand list): unit =
