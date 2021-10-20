@@ -161,7 +161,8 @@ let map_addr (addr:quad) : int option =
 let map_addr_or_seg_fault (addr: quad) : int =
   match map_addr addr with
     | Some ret -> ret
-    | None -> raise X86lite_segfault
+    | None -> print_endline("Seg fault at address " ^ (Int64.to_string addr));
+              raise X86lite_segfault
 
 (* Simulates one step of the machine:
     - fetch the instuction at %rip
@@ -176,11 +177,12 @@ let get_ind_mem_addr (m: mach) (opd: operand) : int64 =
   | Ind1 Lit l -> l
   | Ind2 r -> m.regs.(rind r)
   | Ind3 (Lit l, r) -> Int64.add m.regs.(rind r) l
-  | _ -> invalid_arg "get_opd_mem_addr: expecting Ind operand"
+  | _ -> invalid_arg "get_ind_mem_addr: expecting Ind operand"
 
 let get_opd_val (m: mach) (opd: operand) : int64 =
   match opd with
   | Imm Lit l -> l
+  | Imm Lbl _ -> invalid_arg "get_opd_val: unexpected Lbl"
   | Reg r -> m.regs.(rind r)
   | _ -> int64_of_sbytes (Array.to_list (
       Array.sub m.mem (map_addr_or_seg_fault (get_ind_mem_addr m opd)) 8
