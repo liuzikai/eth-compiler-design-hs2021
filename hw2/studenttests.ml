@@ -110,10 +110,116 @@ let provided_tests : suite = provided_tests @ [
 
 
 (* ============================================================ *)
-(*   System Tests from Nicola Dardanis and David Bernhard       *)
+(*               System Tests from the Shared Repo              *)
 (* ============================================================ *)
-(* @nicdard and @dbernhard-0x7CD *)
 (* https://github.com/nicdard/compiler-design-eth-tests/raw/main/02/studenttests.ml *)
+(* Retrieved on 2021.10.21                                                          *)
+(* Contributors:                                                                    *)
+(* Nicola Dardanis                                                                  *)
+(* David Bernhard                                                                   *)
+(* thbwd                                                                            *)
+(* Jannis Schonleber                                                                *)
+
+(* some useful constructs *)
+let redefinedsym_test (p:prog) () =
+  try ignore (assemble p);
+    failwith "Should have raised Redefined_sym"
+  with
+    | Redefined_sym _ -> ()
+    | _ -> failwith "Should have raised Redefined_sym"
+
+let prog_nothing = [ text "main"
+    [ Retq, [] ]
+]
+
+let prog_int (n: int) = [ text "main"
+    [ Movq, [~$n; ~%Rax] (* move immidiate to reg*)
+    ; Retq, []
+    ]
+  ]
+
+let prog_callq_ret (n: int) =
+  [ text "main"
+    [ Movq, [~$12; ~%Rax] (* move immidiate to reg*)
+    ; Callq, [~$$"setblock" ]
+    ; Retq, []
+  ]
+; text "setblock"
+    [ Movq, [~$n; ~%Rax]
+    ; Retq, []
+    ]
+]
+
+let prog_double_symb = [ text "foo"
+                  [ Xorq, [~%Rax; ~%Rax]
+                  ; Movq, [~$100; ~%Rax]
+                  ; Retq, []
+                  ]
+            ; text "main"
+                  [ Xorq, [~%Rax; ~%Rax]
+                  ; Movq, [Ind1 (Lbl "foo"); ~%Rax]
+                  ; Retq, []
+                  ]
+            ;  data "foo"
+                  [ Quad (Lit 99L)
+                  ; Asciz "Hello, world!"
+                  ]
+            ]
+
+
+let prog_placement =
+  [ data "foo"
+        [ Quad (Lit 42L)
+        ; Quad (Lit 40L)
+        ]
+  ; text "main"
+        [ Leaq, [Ind1 (Lbl "foo"); ~%Rax]
+        ; Retq, []
+        ]
+  ]
+
+let prog_placement_ind_lit =
+  [ text "main"
+        [ Leaq, [Ind1 (Lit 0x400001L); ~%Rax]
+        ; Retq, []
+        ]
+  ]
+
+let prog_leaq_ind2 =
+  [ data "foo"
+        [ Quad (Lit 42L)
+        ; Quad (Lit 40L)
+        ]
+  ; text "main"
+        [ Movq, [~$$"foo"; ~%Rax]
+        ; Leaq, [Ind2 Rax; ~%Rax]
+        ; Retq, [] (* should return mem_bot + 24 (or + 0x16) *)
+        ]
+  ]
+
+let prog_mov_ind3 =
+  [ data "foo"
+        [ Quad (Lit 420L)
+        ; Quad (Lit 39L)
+        ]
+  ; text "main"
+        [ Movq, [(Imm (Lbl "foo")); ~%Rax]
+        ; Movq, [(Ind3 (Lit 8L, Rax)); ~%Rax]
+        ; Retq, []
+        ]
+  ]
+
+let prog_dec_reg =
+  [ data "foo"
+        [ Quad (Lit 42L)
+        ; Quad (Lit 40L)
+        ]
+  ; text "main"
+        [ Movq, [~$12; ~%Rax] (* move immidiate to reg*)
+        ; Decq, [~%Rax]
+        ; Retq, []
+        ]
+  ]
 
 (* Function prologue and epilogue. *)
 let function_prologue : ins list =
@@ -183,6 +289,31 @@ let fibonacci = [
                         ]
 ]
 
+let log (a: int64) = [
+    text "log"
+    [ Cmpq, [~$2; ~%Rdi]
+    ; J Lt, [~$$"exit"]
+    ; Pushq, [~%Rax]
+    ; Movq, [~%Rdi; ~%Rax]
+    ; Shrq, [~$63; ~%Rax]
+    ; Addq, [~%Rdi; ~%Rax]
+    ; Sarq, [~$1; ~%Rax]
+    ; Movq, [~%Rax; ~%Rdi]
+    ; Callq, [~$$"log"]
+    ; Addq, [~$1; ~%Rax]
+    ; Addq, [~$8; ~%Rsp]
+    ; Retq, []];
+    text "exit"
+    [ Xorq, [~%Rax; ~%Rax]
+    ; Retq, []];
+    text "main"
+    [ Pushq, [~%Rax]
+    ; Movq, [Imm (Lit a); ~%Rdi]
+    ; Callq, [~$$"log"]
+    ; Popq, [~%Rcx]
+    ; Retq, []];
+  ]
+
 let cc_not = fun () -> Gradedtests.test_machine
   [InsB0 (Movq, [~$1; ~%Rax]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag
   ;InsB0 (Notq, [~%Rax]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag
@@ -197,6 +328,11 @@ let cc_not_negative = fun () -> Gradedtests.test_machine
 let cc_and = fun () -> Gradedtests.test_machine
   [InsB0 (Movq, [Imm (Lit 0x0F0F0F0FL); ~%Rax]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag
   ;InsB0 (Andq, [Imm (Lit 0xF0F0F0FFL); ~%Rax]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag
+  ]
+
+let cc_and_arg = fun (a:int) (b:int) -> Gradedtests.test_machine
+  [InsB0 (Movq, [~$a; ~%Rax]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag
+  ;InsB0 (Andq, [~$b; ~%Rax]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag
   ]
 
 let cc_or = fun () -> Gradedtests.test_machine
@@ -239,6 +375,16 @@ let cc_sub = fun (dest:Int64.t) (src:Int64.t) -> Gradedtests.test_machine
   ;InsB0 (Subq, [Imm (Lit src); ~%Rax]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag
   ]
 
+let cc_imul = fun (a:int64) (b:int64) -> Gradedtests.test_machine
+  [InsB0 (Movq, [Imm (Lit a); ~%Rax]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag
+  ;InsB0 (Imulq, [Imm (Lit b); ~%Rax]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag
+  ]
+
+let cc_neg = fun (a:int64) -> Gradedtests.test_machine
+  [InsB0 (Movq, [Imm (Lit a); ~%Rax]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag
+  ;InsB0 (Negq, [~%Rax]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag
+  ]
+
 let condition_flag_set_tests =
   [ (* Logic instruction. *)
     ("cc_and", Gradedtests.cs_test 2 (cc_and ()) (false, false, false))
@@ -246,6 +392,8 @@ let condition_flag_set_tests =
   ; ("cc_xor", Gradedtests.cs_test 2 (cc_xor ()) (false, false, false))
   ; ("cc_not", Gradedtests.csi_test 2 (cc_not ()))
   ; ("cc_not_negative", Gradedtests.cs_test 3 (cc_not_negative ()) (false, false, false))
+  ; ("cc_and_arg_eq_0", Gradedtests.cs_test 2 (cc_and_arg 0 12345) (false, false, true))
+  ; ("cc_and_arg_eq_neg_1", Gradedtests.cs_test 2 (cc_and_arg (-1) (-1)) (false, true, false))
 
     (* Bit-manipulation instructions. *)
   ; ("cc_sar_0_a", Gradedtests.cc_test "OF:false SF:false ZF:false" 2 (cc_sar 0 0x0F0F0F0FL) (false, false, false)
@@ -271,6 +419,7 @@ let condition_flag_set_tests =
   ; ("cc_shl_1_neg_a", Gradedtests.cso_test 2 (cc_shl 1 Int64.min_int) true)
   ; ("cc_shl_1_neg_b", Gradedtests.cc_test "OF:true SF:false ZF:true" 2 (cc_shl 1 Int64.min_int) (false, true, false)
     (fun m -> m.flags.fo && (not m.flags.fs) && m.flags.fz))
+  ; ("cc_shl_1_top_equal", Gradedtests.cso_test 2 (cc_shl 1 (-1L)) false)
   ; ("cc_shl_n_a", Gradedtests.cc_test "OF:false SF:false ZF:false" 2 (cc_shl 1 12L) (false, true, true)
     (fun m -> not m.flags.fo && not m.flags.fs && not m.flags.fz))
   ; ("cc_shl_n_a", Gradedtests.cc_test "OF:false SF:true ZF:false" 2 (cc_shl 60 12L) (false, false, true)
@@ -287,6 +436,12 @@ let condition_flag_set_tests =
       (fun m -> m.flags.fo && not m.flags.fs && not m.flags.fz))
   ; ("cc_shr_max", Gradedtests.cc_test "OF:true SF:false ZF:true" 2 (cc_shr 63 Int64.max_int) (true, true, false)
       (fun m -> m.flags.fo && not m.flags.fs && m.flags.fz))
+
+  ; ("cc_imul", Gradedtests.cc_test "OF:false" 2 (cc_imul 2L 4L) (true, true, true)
+      (fun m -> not m.flags.fo))
+  ; ("cc_imul", Gradedtests.cc_test "OF:true" 2 (cc_imul 4L Int64.max_int) (false, true, true)
+      (fun m -> m.flags.fo))
+  ; ("cc_neg", Gradedtests.cs_test 2 (cc_neg Int64.min_int) (true, true, false))
 
     (* Arithmetic instructions. *)
   ; ("cc_sub_1", Gradedtests.cs_test 2 (cc_sub 0xFFFFFFFFFFFFFFFFL (-1L)) (false, false, true))
@@ -380,11 +535,24 @@ let setb = fun (cnd:cnd) -> Gradedtests.test_machine
   ;InsB0 (Set cnd, [Gradedtests.stack_offset 0L]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag
   ]
 
+let set_cmp = fun (a:int64) (b:int64) (cnd:cnd) -> Gradedtests.test_machine
+  [InsB0 (Movq, [Imm (Lit a); ~%Rax]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag
+  ;InsB0 (Cmpq, [Imm (Lit b); ~%Rax]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag
+  ;InsB0 (Movq, [Imm (Lit Int64.max_int); ~%Rax]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag
+  ;InsB0 (Set cnd, [~%Rax]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag
+  ;InsB0 (Movq, [Imm (Lit (Int64.max_int)); Gradedtests.stack_offset 0L]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag
+  ;InsB0 (Set cnd, [Gradedtests.stack_offset 0L]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag
+  ]
+
 let bin_aop = fun (op:opcode) -> Gradedtests.test_machine
   [InsB0 (Movq, [~$2; ~%Rax]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag
   ;InsB0 (Movq, [~$22; ~%Rbx]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag
   ;InsB0 (op, [~%Rbx; ~%Rax]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag
   ]
+
+let leaq_simpl = fun (rax:quad) (src:operand) -> Gradedtests.test_machine
+  [InsB0 (Movq, [Imm (Lit rax); ~%Rax]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag
+  ; InsB0 (Leaq, [src; ~%Rax]);InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag;InsFrag]
 
 let instruction_tests = [
   ("leaq", Gradedtests.machine_test "r12=4194304L rbx=4194336L rax=4194344L" 4 (leaq ())
@@ -464,10 +632,44 @@ let instruction_tests = [
       && int64_of_sbytes (Gradedtests.sbyte_list m.mem (mem_size-8)) = Int64.sub Int64.max_int 254L
     )
   );
+  ("setb_cmp", Gradedtests.machine_test "rax=*65528=0x7FFFFFFFFFFFFF01L" 6 (set_cmp 10L 10L Eq)
+    (fun m ->
+      let exp = Int64.sub Int64.max_int 254L in
+        m.regs.(rind Rax) = exp
+        && int64_of_sbytes (Gradedtests.sbyte_list m.mem (mem_size-8)) = exp
+    )
+  );
+  ("setb_cmp", Gradedtests.machine_test "rax=*65528=0x7FFFFFFFFFFFFF00L" 6 (set_cmp 11L 10L Eq)
+    (fun m ->
+      let exp = Int64.sub Int64.max_int 255L in
+        m.regs.(rind Rax) = exp
+        && int64_of_sbytes (Gradedtests.sbyte_list m.mem (mem_size-8)) = exp
+    )
+  );
+  ("setb_cmp", Gradedtests.machine_test "rax=*65528=0x7FFFFFFFFFFFFF01L" 6 (set_cmp 10L 10L Ge)
+    (fun m ->
+      let exp = Int64.sub Int64.max_int 254L in
+        m.regs.(rind Rax) = exp
+        && int64_of_sbytes (Gradedtests.sbyte_list m.mem (mem_size-8)) = exp
+    )
+  );
+  ("setb_cmp", Gradedtests.machine_test "rax=*65528=0x7FFFFFFFFFFFFF01L" 6 (set_cmp (-10L) 10L Le)
+    (fun m ->
+      let exp = Int64.sub Int64.max_int 254L in
+        m.regs.(rind Rax) = exp
+        && int64_of_sbytes (Gradedtests.sbyte_list m.mem (mem_size-8)) = exp
+    )
+  );
   ("addq", Gradedtests.machine_test "rax=24L" 3 (bin_aop Addq)
     (fun m -> m.regs.(rind Rax) = 24L));
   ("subq", Gradedtests.machine_test "rax=24L" 3 (bin_aop Subq)
     (fun m -> m.regs.(rind Rax) = -20L));
+  ("leaq", Gradedtests.machine_test "90()" 2 (leaq_simpl 0L (Ind1 (Lit 90L)))
+    (fun m -> m.regs.(rind Rax) = 90L));
+  ("leaq", Gradedtests.machine_test "(%rax)" 2 (leaq_simpl 10L (Ind2 Rax))
+    (fun m -> m.regs.(rind Rax) = 10L));
+  ("leaq", Gradedtests.machine_test "10(%rax)" 2 (leaq_simpl 10L (Ind3 (Lit 10L, Rax)))
+    (fun m -> m.regs.(rind Rax) = 20L));
 ]
 
 let provided_tests : suite = provided_tests @ [
@@ -477,8 +679,32 @@ let provided_tests : suite = provided_tests @ [
     ; ("addq", Gradedtests.program_test (main_driver::addq) 3L )
     ; ("fibonacci", Gradedtests.program_test (main_driver::fibonacci) 832040L)
   ]);
+  Test ("Debug: Lookup Table Generation", [
+    ("redefined sym", redefinedsym_test [text "main" [Retq,[]]; text "main" [Retq,[]]])
+    ; ("redefined sym", redefinedsym_test [text "a" []; text "main" [Retq,[]]; text "a" [Retq,[]]])
+  ]);
   Test ("Debug: Condition Flags Set Tests", condition_flag_set_tests);
-  Test ("Debug: Instruction Tests", instruction_tests)
+  Test ("Debug: Instruction Tests", instruction_tests);
+  Test ("Debug: Tests by dbernhard", [
+    ("prog_exit", Gradedtests.program_test prog_nothing 0L)
+    ; ("prog_movq_ret3", Gradedtests.program_test (prog_int 3) 3L)
+    ; ("prog_callq_ret900", Gradedtests.program_test (prog_callq_ret 900) 900L)
+    ; ("prog_double_symb", redefinedsym_test prog_double_symb)
+    ; ("prog_placement", Gradedtests.program_test prog_placement 0x400010L)
+    ; ("prog_placement_ind_lit", Gradedtests.program_test prog_placement_ind_lit 0x400001L)
+    ; ("prog_leaq_ind2", Gradedtests.program_test prog_leaq_ind2 0x400018L)
+    ; ("prog_mov_ind3", Gradedtests.program_test prog_mov_ind3 39L)
+    ; ("prog_dec_reg", Gradedtests.program_test prog_dec_reg 11L)
+
+  ]);
+  Test ("Debug End-to-end Log Tests", [
+    ("log 1", Gradedtests.program_test (log 1L) (0L))
+    ; ("log 2", Gradedtests.program_test (log 2L) (1L))
+    ; ("log 3", Gradedtests.program_test (log 3L) (1L))
+    ; ("log 4419", Gradedtests.program_test (log 4419L) (12L))
+    ; ("log 15630003", Gradedtests.program_test (log 15630003L) (23L))
+    ; ("log 2^63-1", Gradedtests.program_test (log 0x7fffffffffffffffL) (62L))
+  ])
 ]
 
 (* ============================================================ *)
