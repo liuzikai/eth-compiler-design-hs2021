@@ -710,8 +710,11 @@ let provided_tests : suite = provided_tests @ [
 (* ============================================================ *)
 (*                 System Tests from Zikai Liu                  *)
 (* ============================================================ *)
+(* Inspired by https://github.com/JuliaLang/Microbenchmarks/blob/master/perf.c *)
+(* Assemble with Compiler Explorer                                             *)
+(* Adapted by Zikai Liu                                                        *)
 
-let parse_int = [
+let parse_int (input: string) (base: int) = [
   text "_Z9parse_intPKcl" [
       Pushq, [ ~%Rbp ]
     ; Movq, [ ~%Rsp; ~%Rbp ]
@@ -785,18 +788,22 @@ let parse_int = [
       Pushq, [ ~%Rbp ]
     ; Movq, [ ~%Rsp; ~%Rbp ]
     ; Movq, [ ~$$".L.str"; ~%Rdi ]
-    ; Movq, [ ~$16; ~%Rsi ]
+    ; Movq, [ ~$base; ~%Rsi ]
     ; Callq, [ ~$$"_Z9parse_intPKcl" ]
     ; Popq, [ ~%Rbp ]
     ; Retq, []
   ]
   ; data ".L.str" [
-    Asciz "ECE1"
+    Asciz input
   ]
 ]
 
 let provided_tests : suite = provided_tests @ [
   Test ("Debug: End-to-end Parse_Int", [
-    ("parse_int", Gradedtests.program_test parse_int 0xECE1L)
+    ("parse_int_1", Gradedtests.program_test (parse_int "ECEB" 16) 0xECEBL);
+    ("parse_int_2", Gradedtests.program_test (parse_int "42" 10) 42L);
+    ("parse_int_3", Gradedtests.program_test (parse_int "0101" 16) 0x0101L);
+    ("parse_int_4", Gradedtests.program_test (parse_int "0101" 2) 0b0101L);
+    ("parse_int_5", Gradedtests.program_test (parse_int "6543" 8) 0o6543L)
   ]);
 ]
