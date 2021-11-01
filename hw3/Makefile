@@ -4,10 +4,10 @@ all: main.native
 test: main.native
 	./main.native --test
 
-main.native:
+main.native: backend.ml gradedtests.ml studenttests.ml
 	ocamlbuild -Is util,x86,ll,grading -libs unix,str,nums main.native -use-menhir
 
-main.byte:
+main.byte: backend.ml gradedtests.ml studenttests.ml
 	ocamlbuild -Is util,x86,ll,grading -libs unix,str,nums main.byte -use-menhir
 
 .PHONY: utop repl
