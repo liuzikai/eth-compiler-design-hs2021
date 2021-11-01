@@ -251,7 +251,14 @@ let compile_lbl_block fn lbl ctxt blk : elem =
    [ NOTE: the first six arguments are numbered 0 .. 5 ]
 *)
 let arg_loc (n : int) : operand =
-failwith "arg_loc not implemented"
+  match n with
+  | 0 -> Reg Rdi
+  | 1 -> Reg Rsi
+  | 2 -> Reg Rdx
+  | 3 -> Reg Rcx
+  | 4 -> Reg R08
+  | 5 -> Reg R09
+  | x -> Ind3 (Lit (Int64.of_int ((n - 4) * 8)), Rbp)
 
 
 (* We suggest that you create a helper function that computes the
