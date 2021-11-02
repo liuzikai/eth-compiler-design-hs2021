@@ -34,6 +34,23 @@ let compile_bop = function
   | Ll.Or -> X86.Orq
   | Ll.Xor -> X86.Xorq
 
+(* This helper function computes the location of the nth incoming
+   function argument: either in a register or relative to %rbp,
+   according to the calling conventions.  You might find it useful for
+   compile_fdecl.
+
+   [ NOTE: the first six arguments are numbered 0 .. 5 ]
+*)
+let arg_loc (n : int) : operand =
+  match n with
+  | 0 -> Reg Rdi
+  | 1 -> Reg Rsi
+  | 2 -> Reg Rdx
+  | 3 -> Reg Rcx
+  | 4 -> Reg R08
+  | 5 -> Reg R09
+  | _ -> Ind3 (Lit (Int64.of_int ((n - 4) * 8)), Rbp)
+
 
 (* locals and layout -------------------------------------------------------- *)
 
@@ -100,10 +117,10 @@ let lookup m x = List.assoc x m
    the X86 instruction that moves an LLVM operand into a designated
    destination (usually a register).
 *)
-let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins = function
+let compile_operand (ctxt: ctxt) (dest: X86.operand) : Ll.operand -> ins = function
     | Null -> (Movq, [Imm (Lit 0L); dest])
     | Const c -> (Movq, [Imm (Lit c); dest])
-    | Gid g -> failwith "compile_operand not implemented" (*TODO: how?*)
+    | Gid g -> (Leaq, [Ind3 (Lbl (Platform.mangle g), Rip); dest])
     | Id u -> (Movq, [lookup ctxt.layout u; dest])
 
 
@@ -128,8 +145,64 @@ let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins = functio
    needed). ]
 *)
 
+let compile_call (ctxt: ctxt) (ret_uid: uid)
+  ((ret_ty: ty), (f: Ll.operand), (params: (ty * Ll.operand) list)) : X86.ins list =
 
+  (* TODO: 16-byte alignment? *)
 
+  (* Push parameters *)
+  let param_count = List.length params in
+  let rec pushing_params (ret: X86.ins list) (i: int) : X86.ins list = (
+    if i = param_count then ret else (
+      let _, ll_op = List.nth params i in
+
+      (* Get the X86 operand (Imm or Reg) to be moved or pushed *)
+      let x86_op = match ll_op with
+        | Null -> Imm (Lit 0L)
+        | Const c -> Imm (Lit c)
+        (* Gid address will be computed into RAX (see below) *)
+        | Gid g -> Reg Rax  (* use RAX as intermediate register *)
+        | Id u -> lookup ctxt.layout u
+      in
+
+      (* Append Movq or Pushq to head so that params with larger i get moved or pushed first *)
+      let ret = if i < 6 then
+        (Movq, [x86_op; arg_loc i]) :: ret
+      else
+        (Pushq, [x86_op]) :: ret
+      in
+
+      (* For Gid, address needs to be computed with LEA *)
+      let ret = match ll_op with
+        | Gid g -> (compile_operand ctxt (Reg Rax) ll_op) :: ret
+        | _ -> ret
+      in
+
+      (* Handle param on the right (to be moved or pushed before the current one) *)
+      pushing_params ret (i + 1)
+    )
+  ) in
+  let res = pushing_params [] 0  (* pushing first param is the last inst, so first param on the top *) in
+
+  (* Call the function *)
+  let f_gid = match f with
+    | Gid gid -> gid
+    | _ -> failwith "compile_call: function is not Gid"
+  in
+  let res = res @ [(Callq, [Imm (Lbl (Platform.mangle f_gid))])] in
+
+  (* Store return value if needed *)
+  let res = match ret_ty with
+    | Void -> res
+    | I1 | I8 | I64 | Ptr _ -> res @ [(Movq, [Reg Rax; lookup ctxt.layout ret_uid])]
+    | _ -> failwith "compile_call: invalid ret_ty"
+  in
+
+  (* Pop parameters *)
+  let res = res @ [(Addq, [Imm (Lit (Int64.of_int (param_count * 8))); Reg Rsp])] in
+
+  (* Final result *)
+  res
 
 (* compiling getelementptr (gep)  ------------------------------------------- *)
 
@@ -223,6 +296,7 @@ let compile_binop (ctxt: ctxt) (uid: uid) (bop, ty, op1, op2) : X86.ins list =
 let compile_insn (ctxt: ctxt) ((uid: uid), (i: Ll.insn)) : X86.ins list =
   match i with
   | Binop (bop, ty, op1, op2) -> compile_binop ctxt uid (bop, ty, op1, op2)
+  | Call (ret_ty, f, params) -> compile_call ctxt uid (ret_ty, f, params)
   | _ -> failwith "compile_insn not implemented"  (* TODO: *)
 
 
@@ -278,24 +352,6 @@ let compile_lbl_block fn lbl ctxt blk : elem =
 
 
 (* compile_fdecl ------------------------------------------------------------ *)
-
-
-(* This helper function computes the location of the nth incoming
-   function argument: either in a register or relative to %rbp,
-   according to the calling conventions.  You might find it useful for
-   compile_fdecl.
-
-   [ NOTE: the first six arguments are numbered 0 .. 5 ]
-*)
-let arg_loc (n : int) : operand =
-  match n with
-  | 0 -> Reg Rdi
-  | 1 -> Reg Rsi
-  | 2 -> Reg Rdx
-  | 3 -> Reg Rcx
-  | 4 -> Reg R08
-  | 5 -> Reg R09
-  | _ -> Ind3 (Lit (Int64.of_int ((n - 4) * 8)), Rbp)
 
 
 (* We suggest that you create a helper function that computes the
