@@ -226,10 +226,19 @@ let compile_call (ctxt: ctxt) (ret_uid: uid)
    - Void, i8, and functions have undefined sizes according to LLVMlite.
      Your function should simply return 0 in those cases
 *)
-let rec size_ty (tdecls:(tid * ty) list) (t:Ll.ty) : int =
-failwith "size_ty not implemented"
+let rec size_ty (tdecls: (tid * ty) list) (t: Ll.ty) : int =
+  match t with
+  | I1 | I64 | Ptr _ -> 8
+  | Struct tys -> List.fold_left (fun ret ty -> ret + (size_ty tdecls ty)) 0 tys
+  | Array (n, ty) -> n * (size_ty tdecls ty)
+  | Namedt tid -> size_ty tdecls (lookup tdecls tid)
+  | Void | I8 | Fun (_, _) -> 0
 
 
+let rec resolve_named_t (tdecls: (tid * ty) list) (t: Ll.ty) : Ll.ty =
+  match t with
+  | Namedt tid -> resolve_named_t tdecls (lookup tdecls tid)
+  | _ -> t
 
 
 (* Generates code that computes a pointer value.
@@ -257,9 +266,100 @@ failwith "size_ty not implemented"
       in (4), but relative to the type f the sub-element picked out
       by the path so far
 *)
-let compile_gep (ctxt:ctxt) (op : Ll.ty * Ll.operand) (path: Ll.operand list) : ins list =
-failwith "compile_gep not implemented"
+let compile_gep (ctxt: ctxt) (uid: uid) (op: Ll.ty * Ll.operand) (path: Ll.operand list) : ins list =
+  (* Helper *)
+  let size_ty_int64 (ty: ty) = Int64.of_int (size_ty ctxt.tdecls ty) in
 
+  (* Decode t and put base address to RAX *)
+  let t_ptr, base_addr = op in
+  let t = match t_ptr with
+    | Ptr ty -> ty
+    | _ -> failwith "compile_gep: t_ptr is not Ptr"
+  in
+  let res: ins list = [
+      compile_operand ctxt (Reg Rax) base_addr            (* RAX = base_addr      *)
+  ] in
+
+  (* Compute the first index *)
+  let idx, path_from_1 = (
+    match path with
+    | [] -> failwith "compile_gep: path is empty"
+    | h :: tl -> h, tl
+  ) in
+  let res = (
+    match idx with
+    (* If offset is Const 0, no need to modify RAX *)
+    | Const 0L -> res
+    | _ -> res @  [ compile_operand ctxt (Reg Rcx) idx    (* RCX = idx            *)
+                  ; (Imulq, [Imm (Lit (size_ty_int64 t)); Reg Rcx])
+                                                          (* RCX *= sizeof t      *)
+                  ; (Addq, [Reg Rcx; Reg Rax])            (* RAX += RCX           *)
+                  ]
+  ) in
+
+  (* Walk through t and path together *)
+  let rec walk_through (ret: ins list) (t: ty) (path: Ll.operand list) : ins list = (
+    match path with
+    | [] -> ret
+    | idx :: remaining_path -> (
+      match t with
+
+      (* Handle alias *)
+      | Namedt tid -> walk_through ret (lookup ctxt.tdecls tid) path
+
+      (* Handle struct *)
+      | Struct elems -> (
+
+        (* Walk into the struct *)
+        let next_ret, next_t = (
+          match idx with
+          (* If offset is Const 0, no need to modify RAX *)
+          | Const 0L -> ret (* next_ret *), List.nth elems 0 (* next_t *)
+          | Const c -> (
+            let rec sum_sizes (ret: int64) (i: int64) (elems: ty list) : int64 =
+              if i = 0L then ret else
+              match elems with
+              | [] -> failwith "compile_gep: offset out-of-bound for Struct t"
+              | elem :: tl -> sum_sizes (Int64.add ret (size_ty_int64 elem))
+                                        (Int64.pred i)
+                                        tl
+            in
+            let offset = sum_sizes 0L c elems in
+            ret @ [(Addq, [Imm (Lit offset); Reg Rax])],  (* RAX += sum of sizes  *)
+            List.nth elems (Int64.to_int c) (* next_t *)
+          )
+          | _ -> failwith "compile_gep: offset not Const for Struct t"
+        ) in
+        walk_through next_ret next_t remaining_path
+      )
+
+      (* Handle array *)
+      | Array (n, elem) -> (
+        let next_ret, next_t = (
+          match idx with
+          (* If offset is Const 0, no need to modify RAX *)
+          | Const 0L -> ret (* next_ret *), elem (* next_t *)
+          | _ -> (
+            ret @ [ compile_operand ctxt (Reg Rcx) idx    (* RCX += idx           *)
+                  ; (Imulq, [Imm (Lit (size_ty_int64 elem)); Reg Rcx])
+                                                          (* RCX *= sizeof elem   *)
+                  ; (Addq, [Reg Rcx; Reg Rax])            (* RAX += RCX           *)
+                  ] (* next_ret *),
+            elem (* next_t *)
+          )
+        ) in
+        walk_through next_ret next_t remaining_path
+      )
+
+      (* Invalid t *)
+      | _ -> failwith "compile_gep: invalid path for not Struct or Array type"
+
+    ) (* end of idx :: remaining_path *)
+  ) (* end of walk_through *) in
+  let res = walk_through res t path_from_1 in
+
+  (* Store result to uid *)
+  res @ [(Movq, [Reg Rax; lookup ctxt.layout uid])]
 
 
 (* compiling instructions  -------------------------------------------------- *)
@@ -271,6 +371,14 @@ let compile_binop (ctxt: ctxt) (uid: uid) (bop, ty, op1, op2) : X86.ins list =
   ; (compile_bop bop, [Reg Rcx; Reg Rax])  (* result in RAX *)
   ; (Movq, [Reg Rax; lookup ctxt.layout uid])  (* store RAX to the stack *)
   ]
+
+
+let compile_alloca (ctxt: ctxt) (uid: uid) (ty: ty) : X86.ins list =
+  let ty_size = size_ty ctxt.tdecls ty in
+  [ (Subq, [Imm (Lit (Int64.of_int ty_size)); Reg Rsp])
+  ; (Movq, [Reg Rsp; lookup ctxt.layout uid])
+  ]
+
 
 (* The result of compiling a single LLVM instruction might be many x86
    instructions.  We have not determined the structure of this code
@@ -297,6 +405,8 @@ let compile_insn (ctxt: ctxt) ((uid: uid), (i: Ll.insn)) : X86.ins list =
   match i with
   | Binop (bop, ty, op1, op2) -> compile_binop ctxt uid (bop, ty, op1, op2)
   | Call (ret_ty, f, params) -> compile_call ctxt uid (ret_ty, f, params)
+  | Alloca ty -> compile_alloca ctxt uid ty
+  | Gep (ty, op, path) -> compile_gep ctxt uid (ty, op) path
   | _ -> failwith "compile_insn not implemented"  (* TODO: *)
 
 
