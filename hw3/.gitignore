@@ -2,3 +2,5 @@
 *.icloud
 .idea/
 cmake-build-*/
+output/
+a.out

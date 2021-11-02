@@ -22,6 +22,17 @@ let compile_cnd = function
   | Ll.Sgt -> X86.Gt
   | Ll.Sge -> X86.Ge
 
+(* Map LL binary opcodes to X86 opcodes *)
+let compile_bop = function
+  | Ll.Add  -> X86.Addq
+  | Ll.Sub  -> X86.Subq
+  | Ll.Mul -> X86.Imulq
+  | Ll.Shl -> X86.Shlq
+  | Ll.Lshr -> X86.Shrq
+  | Ll.Ashr -> X86.Sarq
+  | Ll.And -> X86.Andq
+  | Ll.Or -> X86.Orq
+  | Ll.Xor -> X86.Xorq
 
 
 (* locals and layout -------------------------------------------------------- *)
@@ -89,8 +100,11 @@ let lookup m x = List.assoc x m
    the X86 instruction that moves an LLVM operand into a designated
    destination (usually a register).
 *)
-let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins =
-  function _ -> failwith "compile_operand unimplemented"
+let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins = function
+    | Null -> (Movq, [Imm (Lit 0L); dest])
+    | Const c -> (Movq, [Imm (Lit c); dest])
+    | Gid g -> failwith "compile_operand not implemented" (*TODO: how?*)
+    | Id u -> (Movq, [lookup ctxt.layout u; dest])
 
 
 
@@ -177,6 +191,14 @@ failwith "compile_gep not implemented"
 
 (* compiling instructions  -------------------------------------------------- *)
 
+let compile_binop (ctxt: ctxt) (uid: uid) (bop, ty, op1, op2) : X86.ins list =
+  (* Use caller-saved register: RAX, RCX (sarq/shlq/shrq can only use RCX as AMT) *)
+  [ compile_operand ctxt (Reg Rax) op1
+  ; compile_operand ctxt (Reg Rcx) op2
+  ; (compile_bop bop, [Reg Rcx; Reg Rax])  (* result in RAX *)
+  ; (Movq, [Reg Rax; lookup ctxt.layout uid])  (* store RAX to the stack *)
+  ]
+
 (* The result of compiling a single LLVM instruction might be many x86
    instructions.  We have not determined the structure of this code
    for you. Some of the instructions require only a couple of assembly
@@ -198,8 +220,10 @@ failwith "compile_gep not implemented"
 
    - Bitcast: does nothing interesting at the assembly level
 *)
-let compile_insn (ctxt:ctxt) ((uid:uid), (i:Ll.insn)) : X86.ins list =
-      failwith "compile_insn not implemented"
+let compile_insn (ctxt: ctxt) ((uid: uid), (i: Ll.insn)) : X86.ins list =
+  match i with
+  | Binop (bop, ty, op1, op2) -> compile_binop ctxt uid (bop, ty, op1, op2)
+  | _ -> failwith "compile_insn not implemented"  (* TODO: *)
 
 
 
@@ -221,8 +245,18 @@ let mk_lbl (fn:string) (l:string) = fn ^ "." ^ l
 
    [fn] - the name of the function containing this terminator
 *)
-let compile_terminator (fn:string) (ctxt:ctxt) (t:Ll.terminator) : ins list =
-  failwith "compile_terminator not implemented"
+let compile_terminator (fn: string) (ctxt: ctxt) ((_: uid), (t: Ll.terminator)) : ins list =
+  match t with
+  | Ret (ty, optional_op) -> (
+    let ret = [ Movq, [Reg Rbp; Reg Rsp]
+              ; Popq, [Reg Rbp]
+              ; (Retq, [])
+              ] in
+    match optional_op with
+    | Some op -> (compile_operand ctxt (Reg Rax) op) :: ret
+    | None -> ret
+  )
+  | _ -> failwith "compile_terminator not implemented"  (* TODO: *)
 
 
 (* compiling blocks --------------------------------------------------------- *)
@@ -232,8 +266,11 @@ let compile_terminator (fn:string) (ctxt:ctxt) (t:Ll.terminator) : ins list =
    [ctxt] - the current context
    [blk]  - LLVM IR code for the block
 *)
-let compile_block (fn:string) (ctxt:ctxt) (blk:Ll.block) : ins list =
-  failwith "compile_block not implemented"
+let compile_block (fn: string) (ctxt: ctxt) (blk: Ll.block) : ins list =
+  let fold_insn (ret: ins list) ((uid: uid), (insn: insn)) : ins list =
+    ret @ (compile_insn ctxt (uid, insn))
+  in
+  (List.fold_left fold_insn [] blk.insns) @ (compile_terminator fn ctxt blk.term)
 
 let compile_lbl_block fn lbl ctxt blk : elem =
   Asm.text (mk_lbl fn lbl) (compile_block fn ctxt blk)
@@ -258,7 +295,7 @@ let arg_loc (n : int) : operand =
   | 3 -> Reg Rcx
   | 4 -> Reg R08
   | 5 -> Reg R09
-  | x -> Ind3 (Lit (Int64.of_int ((n - 4) * 8)), Rbp)
+  | _ -> Ind3 (Lit (Int64.of_int ((n - 4) * 8)), Rbp)
 
 
 (* We suggest that you create a helper function that computes the
@@ -270,8 +307,34 @@ let arg_loc (n : int) : operand =
    - see the discussion about locals
 
 *)
-let stack_layout (args : uid list) ((block, lbled_blocks):cfg) : layout =
-failwith "stack_layout not implemented"
+let stack_layout (args: uid list) ((block, lbled_blocks): cfg) : layout =
+  (* LLVM lite does not allow locals to hold structured data, only 8-bytes data *)
+  let mk_slot : unit -> X86.operand = (
+      let offset = ref 0L in
+      fun () -> offset := (Int64.sub !offset 8L) (* offset -= 8 *); (Ind3 (Lit !offset, Rbp))
+  ) in
+
+  (* Fold left functions *)
+  let fold_uid (ret: layout) (u: uid) : layout = (u, mk_slot ()) :: ret in
+  let fold_uid_insn_tuple (ret: layout) ((u, _): (uid * insn)) : layout = fold_uid ret u in
+  let fold_uid_terminator_tuple (ret: layout) ((u, _): (uid * terminator)) : layout = fold_uid ret u in
+  let fold_block (ret: layout) (b) = (
+    let t = List.fold_left fold_uid_insn_tuple ret b.insns in
+    fold_uid_terminator_tuple t b.term
+  ) in
+  let fold_lbl_block (ret: layout) (_, b) = fold_block ret b in
+
+  (* Process args *)
+  let res = List.fold_left fold_uid [] args in
+
+  (* Process block *)
+  let res = fold_block res block in
+
+  (* Process lbled_blocks *)
+  let res = List.fold_left fold_lbl_block res lbled_blocks in
+
+  (* Final result *)
+  List.rev res
 
 (* The code for the entry-point of a function must do several things:
 
@@ -289,8 +352,41 @@ failwith "stack_layout not implemented"
    - the function entry code should allocate the stack storage needed
      to hold all of the local stack slots.
 *)
-let compile_fdecl (tdecls:(tid * ty) list) (name:string) ({ f_ty; f_param; f_cfg }:fdecl) : prog =
-failwith "compile_fdecl unimplemented"
+let compile_fdecl (tdecls: (tid * ty) list) (name: string) ({ f_ty; f_param; f_cfg }: fdecl) : prog =
+  let layout = stack_layout f_param f_cfg in
+  let ctxt = { tdecls = tdecls; layout = layout } in
+  let first_block, lbled_block_list = f_cfg in
+
+  (* Compile function entry *)
+  let entry: X86.ins list = [
+    Pushq, [Reg Rbp]
+  ; Movq, [Reg Rsp; Reg Rbp]
+  ; Subq, [Imm (Lit (Int64.of_int ((List.length layout) * 8))); Reg Rsp]
+  ] in
+
+  (* Store argument to the stack *)
+  let compile_storing_param (i: int) (param: uid) : X86.ins list =
+    [ Movq, [arg_loc i; Reg Rax]  (* Movq cannot have two Ind operands *)
+    ; Movq, [Reg Rax; lookup layout param]
+    ]
+  in
+  let rec compile_storing_params (ret: X86.ins list) (i: int) (params: uid list) : X86.ins list =
+    match params with
+    | [] -> ret
+    | h :: tl -> compile_storing_params (ret @ (compile_storing_param i h)) (i + 1) tl
+  in
+  let entry = compile_storing_params entry 0 f_param in
+
+  (* Compile first block *)
+  let res: elem list = [
+    Asm.gtext (Platform.mangle name) (entry @ (compile_block name ctxt first_block))
+  ] in
+
+  (* Compile lbl_blocks *)
+  let fold_lbl_block (ret: elem list) ((lbl: lbl), (block: block)) =
+    compile_lbl_block name lbl ctxt block :: ret  (* reversed *)
+  in
+  List.rev (List.fold_left fold_lbl_block res lbled_block_list)
 
 
 
