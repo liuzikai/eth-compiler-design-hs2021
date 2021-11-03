@@ -199,7 +199,12 @@ let compile_call (ctxt: ctxt) (ret_uid: uid)
   in
 
   (* Pop parameters *)
-  let res = res @ [(Addq, [Imm (Lit (Int64.of_int (param_count * 8))); Reg Rsp])] in
+  let res = (
+    if param_count > 6 then
+      res @ [(Addq, [Imm (Lit (Int64.of_int ((param_count - 6) * 8))); Reg Rsp])]
+    else
+      res
+  ) in
 
   (* Final result *)
   res
