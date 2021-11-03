@@ -407,8 +407,11 @@ let compile_store (ctxt:ctxt) (uid:uid) (ty, op1, op2) : X86.ins list =
  ]
 
 let compile_icmp (ctxt:ctxt) (uid:uid) (cnd, ty, op1, op2) : X86.ins list =
- failwith "icmp not implemented"
-
+	[ compile_operand ctxt (Reg Rax) op1
+	; compile_operand ctxt (Reg Rcx) op2
+	; (Cmpq, [Reg Rax; Reg Rcx])
+	; (Set (compile_cnd cnd), [lookup ctxt.layout uid])
+	]
 
 let compile_bitcast (ctxt: ctxt) (uid: uid) (t1, op, t2) : X86.ins list =
  [ compile_operand ctxt (Reg Rax) op
@@ -450,7 +453,7 @@ let compile_insn (ctxt: ctxt) ((uid: uid), (i: Ll.insn)) : X86.ins list =
 
 (* compiling terminators  --------------------------------------------------- *)
 
-(* prefix the function name [fn] to a label to ensure that the X86 labels are 
+(* prefix the function name [fn] to a label to ensure that the X86 labels are
    globally unique . *)
 let mk_lbl (fn:string) (l:string) = fn ^ "." ^ l
 
@@ -466,23 +469,34 @@ let mk_lbl (fn:string) (l:string) = fn ^ "." ^ l
 
    [fn] - the name of the function containing this terminator
 *)
-let compile_terminator (fn: string) (ctxt: ctxt) ((_: uid), (t: Ll.terminator)) : ins list =
-  match t with
-  | Ret (ty, optional_op) -> (
-    let ret = [ Movq, [Reg Rbp; Reg Rsp]
+let compile_ret (ctxt: ctxt) (ty, optional_op) : ins list =
+	let ret = [ Movq, [Reg Rbp; Reg Rsp]
               ; Popq, [Reg Rbp]
               ; (Retq, [])
               ] in
     match optional_op with
     | Some op -> (compile_operand ctxt (Reg Rax) op) :: ret
     | None -> ret
-  )
-  | _ -> failwith "compile_terminator not implemented"  (* TODO: *)
+
+let compile_br (ctxt: ctxt) (l) =
+	failwith "Br not implemented"
+
+let compile_cbr (ctxt: ctxt) (op, l1, l2) =
+	[ (Cmpq, [Imm(Lit(1L)); (Reg Rax)])
+	; (J Eq, [Imm(Lbl(l1))])
+	; (Jmp, [Imm(Lbl(l2))])
+	]
+
+let compile_terminator (fn: string) (ctxt: ctxt) ((_: uid), (t: Ll.terminator)) : ins list =
+  match t with
+  | Ret (ty, optional_op) -> compile_ret ctxt (ty, optional_op)
+  | Br l -> compile_br ctxt (l)
+	| Cbr (op, l1,l2) -> compile_cbr ctxt (op, l1, l2)
 
 
 (* compiling blocks --------------------------------------------------------- *)
 
-(* We have left this helper function here for you to complete. 
+(* We have left this helper function here for you to complete.
    [fn] - the name of the function containing this block
    [ctxt] - the current context
    [blk]  - LLVM IR code for the block
