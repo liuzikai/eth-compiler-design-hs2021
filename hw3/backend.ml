@@ -409,8 +409,10 @@ let compile_store (ctxt:ctxt) (uid:uid) (ty, op1, op2) : X86.ins list =
 let compile_icmp (ctxt:ctxt) (uid:uid) (cnd, ty, op1, op2) : X86.ins list =
 	[ compile_operand ctxt (Reg Rax) op1
 	; compile_operand ctxt (Reg Rcx) op2
-	; (Cmpq, [Reg Rax; Reg Rcx])
-	; (Set (compile_cnd cnd), [lookup ctxt.layout uid])
+	; (Cmpq, [Reg Rcx; Reg Rax])  (* flags <- op1 - op2 *)
+	; (Movq, [Imm (Lit 0L); Reg Rax]) (* does not change flags *)
+	; (Set (compile_cnd cnd), [Reg Rax])
+	; (Movq, [Reg Rax; lookup ctxt.layout uid])
 	]
 
 let compile_bitcast (ctxt: ctxt) (uid: uid) (t1, op, t2) : X86.ins list =
@@ -455,7 +457,7 @@ let compile_insn (ctxt: ctxt) ((uid: uid), (i: Ll.insn)) : X86.ins list =
 
 (* prefix the function name [fn] to a label to ensure that the X86 labels are
    globally unique . *)
-let mk_lbl (fn:string) (l:string) = fn ^ "." ^ l
+let mk_lbl (fn: string) (l: string) = fn ^ "." ^ l
 
 (* Compile block terminators is not too difficult:
 
@@ -471,29 +473,28 @@ let mk_lbl (fn:string) (l:string) = fn ^ "." ^ l
 *)
 let compile_ret (ctxt: ctxt) (ty, optional_op) : ins list =
 	let ret = [ Movq, [Reg Rbp; Reg Rsp]
-              ; Popq, [Reg Rbp]
-              ; (Retq, [])
-              ] in
+            ; Popq, [Reg Rbp]
+            ; (Retq, [])
+            ] in
     match optional_op with
     | Some op -> (compile_operand ctxt (Reg Rax) op) :: ret
     | None -> ret
 
-let compile_br (ctxt: ctxt) (l) =
-	[(Jmp, [Imm(Lbl(l))])
-	]
-	(*failwith "Br not implemented"*)
+let compile_br (ctxt: ctxt) (fn: string) (l) : ins list=
+	[(Jmp, [Imm (Lbl (mk_lbl fn l))])]
 
-let compile_cbr (ctxt: ctxt) (op, l1, l2) =
-	[ (Cmpq, [Imm(Lit(1L)); (Reg Rax)])
-	; (J Eq, [Imm(Lbl(l1))])
-	; (Jmp, [Imm(Lbl(l2))])
+let compile_cbr (ctxt: ctxt) (fn: string) (op, l1, l2) =
+	[ compile_operand ctxt (Reg Rax) op
+	; (Cmpq, [Imm (Lit 1L); Reg Rax])
+	; (J Eq, [Imm (Lbl (mk_lbl fn l1))])
+	; (Jmp, [Imm (Lbl (mk_lbl fn l2))])
 	]
 
 let compile_terminator (fn: string) (ctxt: ctxt) ((_: uid), (t: Ll.terminator)) : ins list =
   match t with
   | Ret (ty, optional_op) -> compile_ret ctxt (ty, optional_op)
-  | Br l -> compile_br ctxt (l)
-	| Cbr (op, l1,l2) -> compile_cbr ctxt (op, l1, l2)
+  | Br l -> compile_br ctxt fn (l)
+	| Cbr (op, l1,l2) -> compile_cbr ctxt fn (op, l1, l2)
 
 
 (* compiling blocks --------------------------------------------------------- *)
