@@ -479,7 +479,9 @@ let compile_ret (ctxt: ctxt) (ty, optional_op) : ins list =
     | None -> ret
 
 let compile_br (ctxt: ctxt) (l) =
-	failwith "Br not implemented"
+	[(Jmp, [Imm(Lbl(l))])
+	]
+	(*failwith "Br not implemented"*)
 
 let compile_cbr (ctxt: ctxt) (op, l1, l2) =
 	[ (Cmpq, [Imm(Lit(1L)); (Reg Rax)])
