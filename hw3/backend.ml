@@ -51,6 +51,8 @@ let arg_loc (n : int) : operand =
   | 5 -> Reg R09
   | _ -> Ind3 (Lit (Int64.of_int ((n - 4) * 8)), Rbp)
 
+let align_16 (n: int) : int =
+  if (n mod 16) = 0 then n else ((n / 16 + 1) * 16)
 
 (* locals and layout -------------------------------------------------------- *)
 
@@ -148,10 +150,16 @@ let compile_operand (ctxt: ctxt) (dest: X86.operand) : Ll.operand -> ins = funct
 let compile_call (ctxt: ctxt) (ret_uid: uid)
   ((ret_ty: ty), (f: Ll.operand), (params: (ty * Ll.operand) list)) : X86.ins list =
 
-  (* TODO: 16-byte alignment? *)
+  (* Enforce 16-byte alignment if there is param on the stack by pushing a dummy 0 *)
+  let param_count = List.length params in
+  let param_count, params = (
+    if param_count > 6 && (param_count mod 2) <> 0 then
+      (param_count + 1), (params @ [(I64, Const 0L)])
+    else
+      param_count, params
+  ) in
 
   (* Push parameters *)
-  let param_count = List.length params in
   let rec pushing_params (ret: X86.ins list) (i: int) : X86.ins list = (
     if i = param_count then ret else (
       let _, ll_op = List.nth params i in
@@ -380,10 +388,32 @@ let compile_binop (ctxt: ctxt) (uid: uid) (bop, ty, op1, op2) : X86.ins list =
 
 let compile_alloca (ctxt: ctxt) (uid: uid) (ty: ty) : X86.ins list =
   let ty_size = size_ty ctxt.tdecls ty in
-  [ (Subq, [Imm (Lit (Int64.of_int ty_size)); Reg Rsp])
+  (* Enforce 16-byte alignment *)
+  [ (Subq, [Imm (Lit (Int64.of_int (align_16 ty_size))); Reg Rsp])
   ; (Movq, [Reg Rsp; lookup ctxt.layout uid])
   ]
 
+
+let compile_load (ctxt: ctxt) (uid: uid) (ty, op) : X86.ins list =
+ [ compile_operand ctxt (Reg Rax) op
+ ; (Movq, [Ind2 Rax; Reg Rax])
+ ; (Movq, [Reg Rax; lookup ctxt.layout uid])
+ ]
+
+let compile_store (ctxt:ctxt) (uid:uid) (ty, op1, op2) : X86.ins list =
+ [ compile_operand ctxt (Reg Rax) op1
+ ; compile_operand ctxt (Reg Rcx) op2
+ ; (Movq, [Reg Rax; Ind2 Rcx])
+ ]
+
+let compile_icmp (ctxt:ctxt) (uid:uid) (cnd, ty, op1, op2) : X86.ins list =
+ failwith "icmp not implemented"
+
+
+let compile_bitcast (ctxt: ctxt) (uid: uid) (t1, op, t2) : X86.ins list =
+ [ compile_operand ctxt (Reg Rax) op
+ ; (Movq, [Reg Rax; lookup ctxt.layout uid])
+ ]
 
 (* The result of compiling a single LLVM instruction might be many x86
    instructions.  We have not determined the structure of this code
@@ -409,11 +439,13 @@ let compile_alloca (ctxt: ctxt) (uid: uid) (ty: ty) : X86.ins list =
 let compile_insn (ctxt: ctxt) ((uid: uid), (i: Ll.insn)) : X86.ins list =
   match i with
   | Binop (bop, ty, op1, op2) -> compile_binop ctxt uid (bop, ty, op1, op2)
-  | Call (ret_ty, f, params) -> compile_call ctxt uid (ret_ty, f, params)
   | Alloca ty -> compile_alloca ctxt uid ty
+  | Load (ty, op) -> compile_load ctxt uid (ty, op)
+  | Store (ty, op1, op2) -> compile_store ctxt uid (ty, op1, op2)
+  | Icmp (cnd, ty, op1, op2) -> compile_icmp ctxt uid (cnd, ty, op1, op2)
+  | Call (ret_ty, f, params) -> compile_call ctxt uid (ret_ty, f, params)
+  | Bitcast (t1, op, t2) -> compile_bitcast ctxt uid (t1, op, t2)
   | Gep (ty, op, path) -> compile_gep ctxt uid (ty, op) path
-  | _ -> failwith "compile_insn not implemented"  (* TODO: *)
-
 
 
 (* compiling terminators  --------------------------------------------------- *)
@@ -532,7 +564,8 @@ let compile_fdecl (tdecls: (tid * ty) list) (name: string) ({ f_ty; f_param; f_c
   let entry: X86.ins list = [
     Pushq, [Reg Rbp]
   ; Movq, [Reg Rsp; Reg Rbp]
-  ; Subq, [Imm (Lit (Int64.of_int ((List.length layout) * 8))); Reg Rsp]
+  (* Enforce 16-byte alignment *)
+  ; Subq, [Imm (Lit (Int64.of_int (align_16 ((List.length layout) * 8)))); Reg Rsp]
   ] in
 
   (* Store argument to the stack *)
