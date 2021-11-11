@@ -1,4 +1,4 @@
 [submodule "compiler-design-eth-tests"]
 	path = compiler-design-eth-tests
-	url = git@github.com:liuzikai/compiler-design-eth-tests.git
+	url = https://github.com/liuzikai/compiler-design-eth-tests.git
 	branch = main
