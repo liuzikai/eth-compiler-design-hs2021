@@ -37,6 +37,8 @@ let loc (startpos:Lexing.position) (endpos:Lexing.position) (elt:'a) : 'a node =
 %token TILDE    /* ~ */
 %token BANG     /* ! */
 %token GLOBAL   /* global */
+
+/* all binary ops */
 %token NEQ      /* != */
 %token AND      /* & */
 %token OR       /* | */
@@ -50,6 +52,10 @@ let loc (startpos:Lexing.position) (endpos:Lexing.position) (elt:'a) : 'a node =
 %token GT       /* > */
 %token GTE      /* >= */
 
+/* boolean types & values */
+%token TBOOL    /* bool */
+%token TRUE     /* bool */
+%token FALSE    /* bool */
 
 %left PLUS DASH
 %left STAR
@@ -91,18 +97,23 @@ decl:
 arglist:
   | l=separated_list(COMMA, pair(ty,IDENT)) { l }
 
+/* types */
 ty:
   | TINT   { TInt }
+  | TBOOL  { TBool }
   | r=rtyp { TRef r }
 
+/* return types */
 %inline ret_ty:
   | TVOID  { RetVoid }
   | t=ty   { RetVal t }
 
+/* reference types */
 %inline rtyp:
   | TSTRING { RString }
   | t=ty LBRACKET RBRACKET { RArray t }
 
+/* binary ops */
 %inline bop:
   | STAR   { Mul }
   | PLUS   { Add }
@@ -121,23 +132,34 @@ ty:
   | IAND   { IAnd }
   | IOR    { IOr }
 
+/* unary ops */
 %inline uop:
   | DASH  { Neg }
   | BANG  { Lognot }
   | TILDE { Bitnot }
 
+/* global initializers */
 gexp:
+  | i=INT        { loc $startpos $endpos @@ CInt i }
+  | str=STRING   { loc $startpos $endpos @@ CStr str}
   | t=rtyp NULL  { loc $startpos $endpos @@ CNull t }
-  | i=INT      { loc $startpos $endpos @@ CInt i }
+  | TRUE         { loc $startpos $endpos @@ CBool true}
+  | FALSE        { loc $startpos $endpos @@ CBool false}
 
+/* lhs expressions */
 lhs:
   | id=IDENT            { loc $startpos $endpos @@ Id id }
   | e=exp LBRACKET i=exp RBRACKET
                         { loc $startpos $endpos @@ Index (e, i) }
 
+/* expressions */
 exp:
   | i=INT               { loc $startpos $endpos @@ CInt i }
-  | t=rtyp NULL           { loc $startpos $endpos @@ CNull t }
+  | str=STRING          { loc $startpos $endpos @@ CStr str}
+  | t=rtyp NULL         { loc $startpos $endpos @@ CNull t }
+  | TRUE                { loc $startpos $endpos @@ CBool true}
+  | FALSE               { loc $startpos $endpos @@ CBool false}
+  | t=rtyp NULL         { loc $startpos $endpos @@ CNull t }
   | e1=exp b=bop e2=exp { loc $startpos $endpos @@ Bop (b, e1, e2) }
   | u=uop e=exp         { loc $startpos $endpos @@ Uop (u, e) }
   | id=IDENT            { loc $startpos $endpos @@ Id id }
@@ -147,9 +169,11 @@ exp:
                         { loc $startpos $endpos @@ Call (e,es) }
   | LPAREN e=exp RPAREN { e }
 
+/* local declarations */
 vdecl:
   | VAR id=IDENT EQ init=exp { (id, init) }
 
+/* statements */
 stmt:
   | d=vdecl SEMI        { loc $startpos $endpos @@ Decl(d) }
   | p=lhs EQ e=exp SEMI { loc $startpos $endpos @@ Assn(p,e) }
@@ -164,10 +188,12 @@ stmt:
 block:
   | LBRACE stmts=list(stmt) RBRACE { stmts }
 
+/* if statements */
 if_stmt:
   | IF LPAREN e=exp RPAREN b1=block b2=else_stmt
     { loc $startpos $endpos @@ If(e,b1,b2) }
 
+/* else statements */
 else_stmt:
   | (* empty *)       { [] }
   | ELSE b=block      { b }
