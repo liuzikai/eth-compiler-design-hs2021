@@ -59,7 +59,7 @@ let loc (startpos:Lexing.position) (endpos:Lexing.position) (elt:'a) : 'a node =
 
 /**/
 %token NEW      /* new */
-%token <bool>  BOOL
+%token FOR      /* for */
 
 %left PLUS DASH
 %left STAR
@@ -171,14 +171,8 @@ exp:
   | FALSE               { loc $startpos $endpos @@ CBool false}
   | e=exp LBRACKET i=exp RBRACKET
                         { loc $startpos $endpos @@ Index (e, i) }
-  /*| id=IDENT LPAREN es=separated_list(COMMA, exp) RPAREN
-                        { loc $startpos $endpos @@ Call (id,es) }*/
   | NEW t=ty LBRACKET RBRACKET LPAREN es=separated_list(COMMA, exp) RPAREN
                         { loc $startpos $endpos @@ CArr (t, es) }
-  /*| NEW i=INT LBRACKET e=exp RBRACKET
-                        { loc $startpos $endpos @@ NewArr (i, e)}
-  | NEW b=BOOL LBRACKET e=exp RBRACKET
-                        { loc $startpos $endpos @@ NewArr (b, e)}*/
   | e1=exp b=bop e2=exp { loc $startpos $endpos @@ Bop (b, e1, e2) }
   | u=uop e=exp         { loc $startpos $endpos @@ Uop (u, e) }
   | LPAREN e=exp RPAREN { e }
@@ -189,6 +183,8 @@ vdecl:
   | VAR id=IDENT EQ init=exp { (id, init) }
 
 /* decl list */
+vdecls:
+  | l = separated_list(COMMA, vdecl) { l }
 
 /* statements */
 stmt:
@@ -199,6 +195,8 @@ stmt:
   | ifs=if_stmt         { ifs }
   | RETURN SEMI         { loc $startpos $endpos @@ Ret(None) }
   | RETURN e=exp SEMI   { loc $startpos $endpos @@ Ret(Some e) }
+  | FOR LPAREN vd=vdecls SEMI eo=option(exp) SEMI so=option(stmt) RPAREN b=block
+                        { loc $startpos $endpos @@ For(vd, eo, so, b)}
   | WHILE LPAREN e=exp RPAREN b=block
                         { loc $startpos $endpos @@ While(e, b) }
 
