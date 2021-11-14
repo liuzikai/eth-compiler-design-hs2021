@@ -61,8 +61,17 @@ let loc (startpos:Lexing.position) (endpos:Lexing.position) (elt:'a) : 'a node =
 %token NEW      /* new */
 %token FOR      /* for */
 
-%left PLUS DASH
-%left STAR
+/* precedence */
+%left IOR           /*20*/
+%left IAND          /*30*/
+%left OR            /*40*/
+%left AND           /*50*/
+%left EQEQ NEQ        /*60*/
+%left LT LTE GT GTE /*70*/
+%left SHL SHR SAR   /*80*/
+%left PLUS DASH     /*90*/
+%left STAR          /*100*/
+
 %nonassoc BANG
 %nonassoc TILDE
 %nonassoc LBRACKET
