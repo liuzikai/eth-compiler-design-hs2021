@@ -57,6 +57,10 @@ let loc (startpos:Lexing.position) (endpos:Lexing.position) (elt:'a) : 'a node =
 %token TRUE     /* bool */
 %token FALSE    /* bool */
 
+/**/
+%token NEW      /* new */
+%token <bool>  BOOL
+
 %left PLUS DASH
 %left STAR
 %nonassoc BANG
@@ -85,15 +89,18 @@ exp_top:
 stmt_top:
   | s=stmt EOF { s }
 
+/* prog */
 prog:
   | p=list(decl) EOF  { p }
 
+/* global declarations */
 decl:
-  | GLOBAL name=IDENT EQ init=gexp SEMI
+  | GLOBAL name=IDENT EQ init=gexp SEMI /* global variable declarations*/
     { Gvdecl (loc $startpos $endpos { name; init }) }
-  | frtyp=ret_ty fname=IDENT LPAREN args=arglist RPAREN body=block
+  | frtyp=ret_ty fname=IDENT LPAREN args=arglist RPAREN body=block /* function declaration */
     { Gfdecl (loc $startpos $endpos { frtyp; fname; args; body }) }
 
+/* args */
 arglist:
   | l=separated_list(COMMA, pair(ty,IDENT)) { l }
 
@@ -145,6 +152,8 @@ gexp:
   | t=rtyp NULL  { loc $startpos $endpos @@ CNull t }
   | TRUE         { loc $startpos $endpos @@ CBool true}
   | FALSE        { loc $startpos $endpos @@ CBool false}
+  | NEW t=ty LBRACKET RBRACKET LPAREN es=separated_list(COMMA, gexp) RPAREN
+                 { loc $startpos $endpos @@ CArr (t, es)}
 
 /* lhs expressions */
 lhs:
@@ -154,24 +163,32 @@ lhs:
 
 /* expressions */
 exp:
+  | id=IDENT            { loc $startpos $endpos @@ Id id }
   | i=INT               { loc $startpos $endpos @@ CInt i }
   | str=STRING          { loc $startpos $endpos @@ CStr str}
   | t=rtyp NULL         { loc $startpos $endpos @@ CNull t }
   | TRUE                { loc $startpos $endpos @@ CBool true}
   | FALSE               { loc $startpos $endpos @@ CBool false}
-  | t=rtyp NULL         { loc $startpos $endpos @@ CNull t }
-  | e1=exp b=bop e2=exp { loc $startpos $endpos @@ Bop (b, e1, e2) }
-  | u=uop e=exp         { loc $startpos $endpos @@ Uop (u, e) }
-  | id=IDENT            { loc $startpos $endpos @@ Id id }
   | e=exp LBRACKET i=exp RBRACKET
                         { loc $startpos $endpos @@ Index (e, i) }
-  | e=exp LPAREN es=separated_list(COMMA, exp) RPAREN
-                        { loc $startpos $endpos @@ Call (e,es) }
+  /*| id=IDENT LPAREN es=separated_list(COMMA, exp) RPAREN
+                        { loc $startpos $endpos @@ Call (id,es) }*/
+  | NEW t=ty LBRACKET RBRACKET LPAREN es=separated_list(COMMA, exp) RPAREN
+                        { loc $startpos $endpos @@ CArr (t, es) }
+  /*| NEW i=INT LBRACKET e=exp RBRACKET
+                        { loc $startpos $endpos @@ NewArr (i, e)}
+  | NEW b=BOOL LBRACKET e=exp RBRACKET
+                        { loc $startpos $endpos @@ NewArr (b, e)}*/
+  | e1=exp b=bop e2=exp { loc $startpos $endpos @@ Bop (b, e1, e2) }
+  | u=uop e=exp         { loc $startpos $endpos @@ Uop (u, e) }
   | LPAREN e=exp RPAREN { e }
+  | e=exp LPAREN es=separated_list(COMMA, exp) RPAREN { loc $startpos $endpos @@ Call (e,es) }
 
 /* local declarations */
 vdecl:
   | VAR id=IDENT EQ init=exp { (id, init) }
+
+/* decl list */
 
 /* statements */
 stmt:
