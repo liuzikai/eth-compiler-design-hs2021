@@ -179,14 +179,17 @@ exp:
   | t=rtyp NULL         { loc $startpos $endpos @@ CNull t }
   | TRUE                { loc $startpos $endpos @@ CBool true}
   | FALSE               { loc $startpos $endpos @@ CBool false}
-  | e=exp LBRACKET i=exp RBRACKET
-                        { loc $startpos $endpos @@ Index (e, i) }
+  | e1=exp LBRACKET e2=exp RBRACKET
+                        { loc $startpos $endpos @@ Index (e1, e2) }
   | NEW t=ty LBRACKET RBRACKET LPAREN es=separated_list(COMMA, exp) RPAREN
                         { loc $startpos $endpos @@ CArr (t, es) }
+  | NEW t=ty  LBRACKET e=exp RBRACKET
+                        { loc $startpos $endpos @@ NewArr (t,e) }
   | e1=exp b=bop e2=exp { loc $startpos $endpos @@ Bop (b, e1, e2) }
   | u=uop e=exp         { loc $startpos $endpos @@ Uop (u, e) }
   | LPAREN e=exp RPAREN { e }
-  | e=exp LPAREN es=separated_list(COMMA, exp) RPAREN { loc $startpos $endpos @@ Call (e, es) }
+  | e=exp LPAREN es=separated_list(COMMA, exp) RPAREN
+                        { loc $startpos $endpos @@ Call (e, es) }
 
 /* local declarations */
 vdecl:
