@@ -8,37 +8,38 @@ let loc (startpos:Lexing.position) (endpos:Lexing.position) (elt:'a) : 'a node =
 
 /* Declare your tokens here. */
 %token EOF
+
 %token <int64>  INT
-%token NULL
+%token NULL     /* null */
 %token <string> STRING
 %token <string> IDENT
 
 %token TINT     /* int */
 %token TVOID    /* void */
 %token TSTRING  /* string */
+%token TBOOL    /* bool */
+
 %token IF       /* if */
 %token ELSE     /* else */
 %token WHILE    /* while */
+%token FOR      /* for */
 %token RETURN   /* return */
 %token VAR      /* var */
+%token GLOBAL   /* global */
+%token TRUE     /* true */
+%token FALSE    /* false */
+%token NEW      /* new */
+
 %token SEMI     /* ; */
 %token COMMA    /* , */
 %token LBRACE   /* { */
 %token RBRACE   /* } */
+
 %token PLUS     /* + */
 %token DASH     /* - */
 %token STAR     /* * */
 %token EQEQ     /* == */
 %token EQ       /* = */
-%token LPAREN   /* ( */
-%token RPAREN   /* ) */
-%token LBRACKET /* [ */
-%token RBRACKET /* ] */
-%token TILDE    /* ~ */
-%token BANG     /* ! */
-%token GLOBAL   /* global */
-
-/* all binary ops */
 %token NEQ      /* != */
 %token AND      /* & */
 %token OR       /* | */
@@ -52,25 +53,25 @@ let loc (startpos:Lexing.position) (endpos:Lexing.position) (elt:'a) : 'a node =
 %token GT       /* > */
 %token GTE      /* >= */
 
-/* boolean types & values */
-%token TBOOL    /* bool */
-%token TRUE     /* bool */
-%token FALSE    /* bool */
+%token LPAREN   /* ( */
+%token RPAREN   /* ) */
+%token LBRACKET /* [ */
+%token RBRACKET /* ] */
 
-/**/
-%token NEW      /* new */
-%token FOR      /* for */
+%token TILDE    /* ~ */
+%token BANG     /* ! */
+
 
 /* precedence */
-%left IOR           /*20*/
-%left IAND          /*30*/
-%left OR            /*40*/
-%left AND           /*50*/
-%left EQEQ NEQ        /*60*/
-%left LT LTE GT GTE /*70*/
-%left SHL SHR SAR   /*80*/
-%left PLUS DASH     /*90*/
-%left STAR          /*100*/
+%left IOR           /* 20  */
+%left IAND          /* 30  */
+%left OR            /* 40  */
+%left AND           /* 50  */
+%left EQEQ NEQ      /* 60  */
+%left LT LTE GT GTE /* 70  */
+%left SHL SHR SAR   /* 80  */
+%left PLUS DASH     /* 90  */
+%left STAR          /* 100 */
 
 %nonassoc BANG
 %nonassoc TILDE
@@ -185,7 +186,7 @@ exp:
   | e1=exp b=bop e2=exp { loc $startpos $endpos @@ Bop (b, e1, e2) }
   | u=uop e=exp         { loc $startpos $endpos @@ Uop (u, e) }
   | LPAREN e=exp RPAREN { e }
-  | e=exp LPAREN es=separated_list(COMMA, exp) RPAREN { loc $startpos $endpos @@ Call (e,es) }
+  | e=exp LPAREN es=separated_list(COMMA, exp) RPAREN { loc $startpos $endpos @@ Call (e, es) }
 
 /* local declarations */
 vdecl:

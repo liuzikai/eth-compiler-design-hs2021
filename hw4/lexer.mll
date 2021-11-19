@@ -27,28 +27,50 @@
   let reserved_words = [
   (* Keywords *)
   ("null", NULL);
+
   ("void", TVOID);
   ("int", TINT);
   ("string", TSTRING);
+  ("bool", TBOOL);
+
   ("else", ELSE);
   ("if", IF);
   ("while", WHILE);
+  ("for", FOR);
   ("return", RETURN);
   ("var", VAR);
   ("global", GLOBAL);
+  ("true", TRUE);
+  ("false", FALSE);
+  ("new", NEW);
 
   (* Symbols *)
   ( ";", SEMI);
   ( ",", COMMA);
   ( "{", LBRACE);
   ( "}", RBRACE);
+
   ( "+", PLUS);
   ( "-", DASH);
   ( "*", STAR);
   ( "=", EQ);
   ( "==", EQEQ);
+  ( "!=", NEQ);
+  ( "&", AND);
+  ( "|", OR);
+  ( "[&]", IAND);
+  ( "[|]", IOR);
+  ( "<<", SHL);
+  ( ">>", SHR);
+  ( ">>>", SAR);
+  ( "<", LT);
+  ( "<=", LTE);
+  ( ">", GT);
+  ( ">=", GTE);
+
   ( "!", BANG);
   ( "~", TILDE);
+
   ( "(", LPAREN);
   ( ")", RPAREN);
   ( "[", LBRACKET);
@@ -126,7 +148,8 @@ rule token = parse
   | whitespace+ { token lexbuf }
   | newline { newline lexbuf; token lexbuf }
 
-  | ';' | ',' | '{' | '}' | '+' | '-' | '*' | '=' | "==" 
+  | ';' | ',' | '{' | '}' | '+' | '-' | '*' | '=' | "=="
+  | '&' | '|' | "[&]" | "[|]" | "<<" | ">>" | ">>>" | '<' | "<=" | '>' | ">="
   | "!=" | '!' | '~' | '(' | ')' | '[' | ']' 
     { create_token lexbuf }
 
