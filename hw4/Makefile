@@ -11,10 +11,13 @@ all: main.native
 
 .PHONY: test
 test: main.native
-	./main.native --test
+	./main.native --test --clang
 
-main.native: $(SUBMIT) ast.ml astlib.ml backend.ml driver.ml main.ml progasts.ml runtime.c 
+main.native: $(SUBMIT) ast.ml astlib.ml backend.ml driver.ml main.ml progasts.ml runtime.c studenttests.ml gradedtests.ml
 	ocamlbuild -Is $(INCLUDES) -libs $(LIBS) main.native -use-menhir -yaccflag --explain
+
+main.byte: $(SUBMIT) ast.ml astlib.ml backend.ml driver.ml main.ml progasts.ml runtime.c studenttests.ml gradedtests.ml
+	ocamlbuild -cflag -g -lflag -g -Is $(INCLUDES) -libs $(LIBS) main.byte -use-menhir -yaccflag --explain
 
 zip: $(SUBMIT)
 	zip '$(ZIPNAME)' $(SUBMIT)

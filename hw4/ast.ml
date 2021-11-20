@@ -48,10 +48,10 @@ type exp =
 | CBool of bool
 | CInt of int64
 | CStr of string
-| CArr of ty * exp node list
+| CArr of ty * exp node list  (* array initializer list *)
 | NewArr of ty * exp node
 | Id of id
-| Index of exp node * exp node
+| Index of exp node * exp node  (* array subscript *)
 | Call of exp node * exp node list
 | Bop of binop * exp node * exp node
 | Uop of unop * exp node

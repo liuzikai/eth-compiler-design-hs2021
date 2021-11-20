@@ -10,3 +10,9 @@ add_custom_target(make-clean
         DEPENDS Makefile
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         )
+
+add_custom_target(main.native
+        COMMAND $(MAKE) main.native
+        DEPENDS Makefile
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        )
