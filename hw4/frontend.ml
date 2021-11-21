@@ -351,7 +351,7 @@ let decode_arr_ty (arr_struct_ptr_ty: Ll.ty) (loc) : Ll.ty * Ll.ty =
 
 let rec cmp_exp (c: Ctxt.t) (exp: Ast.exp node) : Ll.ty * Ll.operand * stream =
   match exp.elt with
-  | CNull rty -> (cmp_rty rty), Null, []
+  | CNull rty -> (cmp_ty (TRef rty)), Null, []
   | CBool b -> (
     match b with
     | true -> I1, Const 1L, []
