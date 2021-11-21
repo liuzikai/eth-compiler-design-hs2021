@@ -3,7 +3,9 @@ B _build/ll
 B _build/grading
 B _build/util
 B _build/x86
+B _build/compiler-design-eth-tests/04
 S ll
 S grading
 S util
 S x86
+S compiler-design-eth-tests/04

@@ -1,4 +1,4 @@
-INCLUDES= util,x86,grading,ll
+INCLUDES= util,x86,grading,ll,compiler-design-eth-tests/04
 LIBS = unix,str,nums
 SUBMIT := lexer.mll parser.mly frontend.ml team.txt
 

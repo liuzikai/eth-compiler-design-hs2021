@@ -69,7 +69,7 @@ type insn =
 type terminator =
 | Ret of ty * operand option
 | Br of lbl
-| Cbr of operand * lbl * lbl
+| Cbr of operand * lbl * lbl  (* cond, then, else *)
 
 (* Basic Blocks *)
 type block = { insns : (uid * insn) list; term : (uid * terminator) }
