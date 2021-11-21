@@ -602,8 +602,8 @@ let rec cmp_stmt (c: Ctxt.t) (rt: (Ll.ty * Ll.operand * Ll.lbl)) (stmt: Ast.stmt
 
 
 (* Compile a series of statements *)
-and cmp_block (c: Ctxt.t) (rt: Ll.ty) (stmts: Ast.block) : Ctxt.t * stream =
-  List.fold_left (fun (c, code) s -> 
+and cmp_block (c: Ctxt.t) (rt: (Ll.ty * Ll.operand * Ll.lbl)) (stmts: Ast.block) : Ctxt.t * stream =
+  List.fold_left (fun (c, code) s ->
       let c, stmt_code = cmp_stmt c rt s in
       c, code >@ stmt_code
     ) (c,[]) stmts
