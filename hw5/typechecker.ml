@@ -62,7 +62,7 @@ and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
       according to the rules
 
     - the function should fail using the "type_error" helper function if the 
-      type is 
+      type is not well-formed
 
     - l is just an ast node that provides source location information for
       generating error messages (it's only needed for the type_error generation)
@@ -168,14 +168,14 @@ let typecheck_fdecl (tc : Tctxt.t) (f : Ast.fdecl) (l : 'a Ast.node) : unit =
 (* The following functions correspond to the
    judgments that create the global typechecking context.
 
-   create_struct_ctxt: - adds all the struct types to the struct 'S'
+   create_struct_ctxt: - adds all the struct types to the struct 'H'
    context (checking to see that there are no duplicate fields
 
      H |-s prog ==> H'
 
 
    create_function_ctxt: - adds the the function identifiers and their
-   types to the 'F' context (ensuring that there are no redeclared
+   types to the 'G' context (ensuring that there are no redeclared
    function identifiers)
 
      H ; G1 |-f prog ==> G2

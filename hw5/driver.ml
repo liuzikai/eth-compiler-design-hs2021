@@ -142,7 +142,7 @@ let process_files files =
   if (List.length files) > 0 then begin
     List.iter process_file files;
     ( if !assemble && !link then
-        Platform.link (List.rev !link_files) !executable_filename );
+        Platform.link (List.rev !link_files@["runtime.c"]) !executable_filename );
     ( if !assemble && !link && !execute_x86 then
         let ret = run_executable "" !executable_filename in
         print_banner @@ Printf.sprintf "Executing: %s" !executable_filename;
