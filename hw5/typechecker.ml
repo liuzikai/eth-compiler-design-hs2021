@@ -47,11 +47,46 @@ let typ_of_unop : Ast.unop -> Ast.ty * Ast.ty = function
       (Don't forget about OCaml's 'and' keyword.)
 *)
 let rec subtype (c : Tctxt.t) (t1 : Ast.ty) (t2 : Ast.ty) : bool =
-  failwith "todo: subtype"
+  match t1, t2 with
+  | TInt, TInt | TBool, TBool -> true
+  | TNullRef r1, TNullRef r2 -> subtype_ref c r1 r2
+  | TRef r1, TRef r2 -> subtype_ref c r1 r2
+  | TRef r1, TNullRef r2 -> subtype_ref c r1 r2
+  | _ -> false
 
 (* Decides whether H |-r ref1 <: ref2 *)
 and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
-  failwith "todo: subtype_ref"
+  match t1, t2 with
+  | RString, RString -> true
+  | RArray a1, RArray a2 -> (a1 = a2)
+  | RStruct id1, RStruct id2 -> (
+    let fields1 = lookup_struct id1 c in
+    let fields2 = lookup_struct id2 c in
+    let rec is_prefix (fields: Ast.field list) (prefix: Ast.field list) : bool =
+      match fields, prefix with
+      | f :: fs, p :: ps -> if (f = p) then is_prefix fs ps else false
+      | _, [] -> true
+      | [], _ -> false
+    in
+    is_prefix fields1 fields2
+  )
+  | RFun (args1, rt1), RFun (args2, rt2) -> (
+    let rec arg_subtype (args: ty list) (args': ty list) : bool =
+      match args, args' with
+      | arg :: tl, arg' :: tl' -> if (subtype c arg' arg) then arg_subtype tl tl' else false
+      | [], [] -> true
+      | _ -> false
+    in
+    if (arg_subtype args1 args2) then (subtype_ret_ty c rt1 rt2) else false
+  )
+  | _ -> false
+
+(* Decides whether H |-rt rt1 <: rt2 *)
+and subtype_ret_ty (c : Tctxt.t) (t1 : Ast.ret_ty) (t2 : Ast.ret_ty) : bool =
+  match t1, t2 with
+  | RetVoid, RetVoid -> true
+  | RetVal t1, RetVal t2 -> subtype c t1 t2
+  | _ -> false
 
 
 (* well-formed types -------------------------------------------------------- *)
@@ -70,7 +105,33 @@ and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
     - tc contains the structure definition context
  *)
 let rec typecheck_ty (l : 'a Ast.node) (tc : Tctxt.t) (t : Ast.ty) : unit =
-  failwith "todo: implement typecheck_ty"
+  match t with
+  | TInt | TBool -> ()
+  | TRef rty | TNullRef rty -> typecheck_rty l tc rty
+
+(* Decides whether H |-r ref *)
+and typecheck_rty (l : 'a Ast.node) (tc : Tctxt.t) (t : Ast.rty) : unit =
+  match t with
+  | RString -> ()
+  | RArray t -> typecheck_ty l tc t
+  | RStruct id -> (
+    match lookup_struct_option id tc with
+    | Some _ -> ()
+    | None -> type_error l ("struct " ^ id ^ " is not defined")
+  )
+  | RFun (args, rt) -> (
+    let rec check_args = function
+      | h :: tl -> typecheck_ty l tc h; check_args tl
+      | [] -> ()
+    in
+    check_args args; typecheck_ret_ty l tc rt
+  )
+
+(* Decides whether H |-rt rt *)
+and typecheck_ret_ty (l : 'a Ast.node) (tc : Tctxt.t) (t : Ast.ret_ty) : unit =
+  match t with
+  | RetVoid -> ()
+  | RetVal t -> typecheck_ty l tc t
 
 (* typechecking expressions ------------------------------------------------- *)
 (* Typechecks an expression in the typing context c, returns the type of the
@@ -98,7 +159,49 @@ let rec typecheck_ty (l : 'a Ast.node) (tc : Tctxt.t) (t : Ast.ty) : unit =
 
 *)
 let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
-  failwith "todo: implement typecheck_exp"
+  match e.elt with
+  | CNull rty -> typecheck_rty e c rty; TNullRef rty
+  | CBool _ -> TBool
+  | CInt _ -> TInt
+  | CStr _ -> TRef RString
+  | Id id -> (
+    match lookup_local_option id c with
+    | Some t -> t
+    | None -> (
+      match lookup_global_option id c with
+      | Some t -> t
+      | _ -> type_error e ("unknown identifier " ^ id)
+    )
+  )
+  | CArr (t, exps) -> (
+    typecheck_ty e c t;
+    let rec check_exps = function
+      | h :: tl -> (
+        let t' = typecheck_exp c h in
+        if subtype c t' t then
+          check_exps tl
+        else
+          type_error e ("invalid array initializer value")
+      )
+      | _ -> ()
+    in
+    check_exps exps;
+    TRef (RArray t)
+  )
+  | NewArr ((t: ty), exp1, (x: id), exp2) -> (
+    typecheck_ty e c t;
+    if (typecheck_exp c exp1) <> TInt then
+      type_error e ("new array expression expects numerical length")
+    else if (lookup_local_option x c) <> None then
+      type_error e ("identifier " ^ x ^ " is already defined in the local context")
+    else
+      let t' = typecheck_exp (add_local c x TInt) exp2 in
+      if (subtype c t' t) = false then
+        type_error e ("initializer expression does not match the array type")
+      else
+        TRef (RArray t)
+  )
+  | _ -> failwith "todo: implement typecheck_exp"
 
 (* statements --------------------------------------------------------------- *)
 

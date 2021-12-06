@@ -1,6 +1,8 @@
 B _build
 B _build/*
 B _build/**
+B _build/compiler-design-eth-tests/**
 S .
 S *
 S **
+S compiler-design-eth-tests/**
