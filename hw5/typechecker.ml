@@ -175,17 +175,10 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
   )
   | CArr (t, exps) -> (
     typecheck_ty e c t;
-    let rec check_exps = function
-      | h :: tl -> (
-        let t' = typecheck_exp c h in
-        if subtype c t' t then
-          check_exps tl
-        else
-          type_error e ("invalid array initializer value")
-      )
-      | _ -> ()
-    in
-    check_exps exps;
+    let check_exp exp = (if not (subtype c (typecheck_exp c exp) t) then
+        type_error e ("invalid type of array initializer value")
+    ) in
+    List.iter check_exp exps;
     TRef (RArray t)
   )
   | NewArr ((t: ty), exp1, (x: id), exp2) -> (
@@ -206,7 +199,7 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
 (* statements --------------------------------------------------------------- *)
 
 (* Typecheck a statement 
-   This function should implement the statment typechecking rules from oat.pdf.  
+   This function should implement the statement typechecking rules from oat.pdf.
 
    Inputs:
     - tc: the type context
@@ -223,7 +216,7 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
         in the branching statements, both branches must definitely return
 
         Intuitively: if one of the two branches of a conditional does not 
-        contain a return statement, then the entier conditional statement might 
+        contain a return statement, then the entire conditional statement might
         not return.
   
         looping constructs never definitely return 
@@ -236,8 +229,80 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
    - You will probably find it convenient to add a helper function that implements the 
      block typecheck rules.
 *)
-let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.t * bool =
-  failwith "todo: implement typecheck_stmt"
+
+(* H;G;L1 |- vdecl => L2
+
+   Input s for error reporting context. Placed as the first argument so that
+   (typecheck_vdecl s) is a function application that can be used for
+   List.fold_left.
+*)
+let typecheck_vdecl (s: Ast.stmt node) (tc: Tctxt.t) ((id, exp): Ast.vdecl) : Tctxt.t =
+  let t = typecheck_exp tc exp in
+  if lookup_local_option id tc <> None then
+    type_error s ("identifier " ^ id ^ " is already defined in the local context")
+  else
+    add_local tc id t
+
+
+(* H;G;L0 |- vdecls => Li *)
+let rec typecheck_vdecls (s: Ast.stmt node) (tc: Tctxt.t) (vdecls: Ast.vdecl list) : Tctxt.t =
+  List.fold_left (typecheck_vdecl s) tc vdecls
+
+
+(* H;G;L1;rt |- stmt => L2;returns *)
+let rec typecheck_stmt (tc: Tctxt.t) (s: Ast.stmt node) (to_ret: ret_ty) : Tctxt.t * bool =
+  match s.elt with
+
+  (* TYP_ASSN *)
+  | Assn (lhs, exp) -> (
+    (* Check lhs in L or lhs is not a global function id *)
+    let _ = match lhs.elt with
+    | Id id -> (
+      if (lookup_local_option id tc) <> None then ()
+      else match (lookup_global_option id tc) with
+        (* TODO: really? test cases? *)
+        | Some (TRef RFun _) | Some (TNullRef RFun _) ->
+          type_error s ("cannot assign to function identifier " ^ id)
+        | _ -> ()
+    )
+    | _ -> ()
+    in
+    (* Check for remaining rules *)
+    let t = typecheck_exp tc lhs in
+    let t' = typecheck_exp tc exp in
+    if (subtype tc t' t) = false then
+      type_error s ("assignment types unmatched")
+    else
+      tc (* L *), false (* might not return *)
+  )
+
+  (* TYP_STMTDECL *)
+  | Decl vdecl -> (typecheck_vdecl s tc vdecl) (* L2 *), false (* might not return *)
+
+  (* TYP_SCALL *)
+  | SCall (exp, args (* exp1 ... expn *)) -> (
+    match typecheck_exp tc exp with
+    (* Check for void-return function *)
+    | TRef (RFun (ts (* t1 ... tn *), RetVoid)) -> (
+      (* Check the number of arguments *)
+      let cnt = List.length ts in
+      let cnt' = List.length args in
+      if cnt <> cnt' then
+        type_error s ("expecting " ^ (Int.to_string cnt) ^ " argument(s) but " ^ (Int.to_string cnt') ^ " are given")
+      else
+        (* Check each argument *)
+        let check_arg (t1: Ast.ty) (exp1: Ast.exp node) = (
+          let t1' = typecheck_exp tc exp1 in
+          if not (subtype tc t1' t1) then type_error s ("invalid argument type")
+        ) in
+        List.iter2 check_arg ts args;
+        tc (* L *), false (* might not return *)
+    )
+
+    | _ -> type_error s ("not a void-return function")
+  )
+
+  | _ -> failwith "todo: implement typecheck_stmt"
 
 
 (* struct type declarations ------------------------------------------------- *)
