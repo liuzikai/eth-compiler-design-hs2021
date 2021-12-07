@@ -194,6 +194,39 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
       else
         TRef (RArray t)
   )
+  | Index (exp1, exp2) -> (
+    let t1 = typecheck_exp c exp1 in
+    let t2 = typecheck_exp c exp2 in
+    match (t1,t2) with
+    | TRef (RArray t), TInt -> t
+    | _ -> type_error e ("expression does not match")
+  )
+  | Length(exp) -> (
+    match typecheck_exp c exp with
+    | TRef(RArray _) -> TInt
+    | _ -> type_error e ("________")
+  )
+  | Proj (exp, x) -> (
+    match typecheck_exp c exp with
+    | TRef(RStruct t) -> (
+       match lookup_field_option t x c with
+        | Some t -> t
+        | None -> type_error e ("field undefined")
+    )
+    | _ -> type_error e ("type does not match")
+  )
+  | Uop (uop, exp) -> (
+    let (t', t) = typ_of_unop uop in
+    if typecheck_exp c exp <> t
+    then type_error e ("invalid type of uop operand")
+    else t
+  )
+  | Bop (exp1, bop, exp2) -> (
+    let (t1, t2, t) = typ_of_binop bop in
+    if (typecheck_exp c exp1 <> t1) || (typecheck_exp c exp2 <> t2)
+    then type_error e ("invalid type of bop operand")
+    else t
+  )
   | _ -> failwith "todo: implement typecheck_exp"
 
 (* statements --------------------------------------------------------------- *)
