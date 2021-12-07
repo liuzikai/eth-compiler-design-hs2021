@@ -298,11 +298,53 @@ let rec typecheck_stmt (tc: Tctxt.t) (s: Ast.stmt node) (to_ret: ret_ty) : Tctxt
         List.iter2 check_arg ts args;
         tc (* L *), false (* might not return *)
     )
-
     | _ -> type_error s ("not a void-return function")
   )
 
+  (* TYP_IF *)
+  | If (exp, block1, block2) -> (
+    if (typecheck_exp tc exp) <> TBool then
+      type_error s ("if condition does not have type bool")
+    else
+      let r1 = typecheck_block tc block1 to_ret in
+      let r2 = typecheck_block tc block2 to_ret in
+      tc (* L *), r1 && r2 (* might not return *)
+  )
+
+  (* TYP_IFQ *)
+  | Cast (rty (* ref *), id, exp, block1, block2) -> (
+    match typecheck_exp tc exp with
+    | TNullRef ref' -> (
+      if not (subtype_ref tc ref' rty) then
+        type_error s ("if? expression cannot be casted to the given type")
+      else
+        let tc' = add_local tc id (TRef rty) in
+        let r1 = typecheck_block tc' block1 to_ret in
+        let r2 = typecheck_block tc' block2 to_ret in
+        tc (* L *), r1 && r2 (* might not return *)
+    )
+    | _ -> type_error s ("if? expression does not have type ref?")
+  )
+
+
   | _ -> failwith "todo: implement typecheck_stmt"
+
+(* H;G;L;rt |- block;returns, TYP_BLOCK *)
+and typecheck_block (tc: Tctxt.t) (b: Ast.block) (to_ret: ret_ty) : bool =
+  let _, must_ret = typecheck_stmts tc b to_ret in must_ret (* drop tc' *)
+
+(* H;G;L0;rt |-ss stmt1 .. stmtn => Ln;returns, TYP_STMTS *)
+and typecheck_stmts (tc: Tctxt.t) (b: Ast.stmt node list) (to_ret: ret_ty) : Tctxt.t * bool =
+  match b with
+  | s :: b' -> (
+    let tc', must_ret = typecheck_stmt tc s to_ret in
+    (* TODO: should we check must_ret here? *)
+    match b' with
+    | [] -> tc', must_ret
+    | _ -> typecheck_stmts tc' b' to_ret
+  )
+  | _ -> failwith "typecheck_block: unexpected empty b"
+
 
 
 (* struct type declarations ------------------------------------------------- *)
