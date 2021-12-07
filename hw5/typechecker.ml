@@ -46,19 +46,22 @@ let typ_of_unop : Ast.unop -> Ast.ty * Ast.ty = function
       relation. We have included a template for subtype_ref to get you started.
       (Don't forget about OCaml's 'and' keyword.)
 *)
-let rec subtype (c : Tctxt.t) (t1 : Ast.ty) (t2 : Ast.ty) : bool =
+let rec subtype (c: Tctxt.t) (t1: Ast.ty) (t2: Ast.ty) : bool =
   match t1, t2 with
-  | TInt, TInt | TBool, TBool -> true
-  | TNullRef r1, TNullRef r2 -> subtype_ref c r1 r2
-  | TRef r1, TRef r2 -> subtype_ref c r1 r2
-  | TRef r1, TNullRef r2 -> subtype_ref c r1 r2
+  | TInt, TInt | TBool, TBool -> true  (* SUB_SUB_INT & SUB_SUB_BOOL *)
+  | TNullRef r1, TNullRef r2           (* SUB_SUB_NREF *)
+  | TRef r1, TRef r2                   (* SUB_SUB_REF *)
+  | TRef r1, TNullRef r2               (* SUB_SUB_NRREF *)
+    -> subtype_ref c r1 r2
   | _ -> false
 
 (* Decides whether H |-r ref1 <: ref2 *)
-and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
+and subtype_ref (c: Tctxt.t) (t1: Ast.rty) (t2: Ast.rty) : bool =
   match t1, t2 with
-  | RString, RString -> true
-  | RArray a1, RArray a2 -> (a1 = a2)
+  | RString, RString -> true  (* SUB_SUBRSTRING *)
+  | RArray a1, RArray a2 -> (a1 = a2)  (* SUB_SUBRARRAY *)
+
+  (* SUB_SUBRSTRUCT *)
   | RStruct id1, RStruct id2 -> (
     let fields1 = lookup_struct id1 c in
     let fields2 = lookup_struct id2 c in
@@ -70,6 +73,8 @@ and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
     in
     is_prefix fields1 fields2
   )
+
+  (* SUB_SUBRFUNT *)
   | RFun (args1, rt1), RFun (args2, rt2) -> (
     let rec arg_subtype (args: ty list) (args': ty list) : bool =
       match args, args' with
@@ -82,10 +87,10 @@ and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
   | _ -> false
 
 (* Decides whether H |-rt rt1 <: rt2 *)
-and subtype_ret_ty (c : Tctxt.t) (t1 : Ast.ret_ty) (t2 : Ast.ret_ty) : bool =
+and subtype_ret_ty (c: Tctxt.t) (t1: Ast.ret_ty) (t2: Ast.ret_ty) : bool =
   match t1, t2 with
-  | RetVoid, RetVoid -> true
-  | RetVal t1, RetVal t2 -> subtype c t1 t2
+  | RetVoid, RetVoid -> true  (* SUB_SUBRETSVOID *)
+  | RetVal t1, RetVal t2 -> subtype c t1 t2  (* SUB_SUBRETRTTYP *)
   | _ -> false
 
 
@@ -104,13 +109,13 @@ and subtype_ret_ty (c : Tctxt.t) (t1 : Ast.ret_ty) (t2 : Ast.ret_ty) : bool =
 
     - tc contains the structure definition context
  *)
-let rec typecheck_ty (l : 'a Ast.node) (tc : Tctxt.t) (t : Ast.ty) : unit =
+let rec typecheck_ty (l: 'a Ast.node) (tc: Tctxt.t) (t: Ast.ty) : unit =
   match t with
   | TInt | TBool -> ()
   | TRef rty | TNullRef rty -> typecheck_rty l tc rty
 
 (* Decides whether H |-r ref *)
-and typecheck_rty (l : 'a Ast.node) (tc : Tctxt.t) (t : Ast.rty) : unit =
+and typecheck_rty (l: 'a Ast.node) (tc: Tctxt.t) (t: Ast.rty) : unit =
   match t with
   | RString -> ()
   | RArray t -> typecheck_ty l tc t
@@ -128,7 +133,7 @@ and typecheck_rty (l : 'a Ast.node) (tc : Tctxt.t) (t : Ast.rty) : unit =
   )
 
 (* Decides whether H |-rt rt *)
-and typecheck_ret_ty (l : 'a Ast.node) (tc : Tctxt.t) (t : Ast.ret_ty) : unit =
+and typecheck_ret_ty (l: 'a Ast.node) (tc: Tctxt.t) (t: Ast.ret_ty) : unit =
   match t with
   | RetVoid -> ()
   | RetVal t -> typecheck_ty l tc t
@@ -158,12 +163,14 @@ and typecheck_ret_ty (l : 'a Ast.node) (tc : Tctxt.t) (t : Ast.ret_ty) : unit =
    a=1} is well typed.  (You should sort the fields to compare them.)
 
 *)
-let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
+let rec typecheck_exp (c: Tctxt.t) (e: Ast.exp node) : Ast.ty =
   match e.elt with
-  | CNull rty -> typecheck_rty e c rty; TNullRef rty
-  | CBool _ -> TBool
-  | CInt _ -> TInt
-  | CStr _ -> TRef RString
+  | CNull rty -> typecheck_rty e c rty; TNullRef rty  (* TYP_NULL *)
+  | CBool _ -> TBool  (* TYP_BOOL *)
+  | CInt _ -> TInt  (* TYP_INT *)
+  | CStr _ -> TRef RString  (* TYP_STRING *)
+
+  (* TYP_LOCAL & TYP_GLOBAL *)
   | Id id -> (
     match lookup_local_option id c with
     | Some t -> t
@@ -173,6 +180,8 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
       | _ -> type_error e ("unknown identifier " ^ id)
     )
   )
+
+  (* TYP_CARR *)
   | CArr (t, exps) -> (
     typecheck_ty e c t;
     let check_exp exp = (if not (subtype c (typecheck_exp c exp) t) then
@@ -181,6 +190,8 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
     List.iter check_exp exps;
     TRef (RArray t)
   )
+
+  (* TYP_NEWARRAY *)
   | NewArr ((t: ty), exp1, (x: id), exp2) -> (
     typecheck_ty e c t;
     if (typecheck_exp c exp1) <> TInt then
@@ -194,40 +205,99 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
       else
         TRef (RArray t)
   )
+
+  (* TYP_INDEX *)
   | Index (exp1, exp2) -> (
-    let t1 = typecheck_exp c exp1 in
-    let t2 = typecheck_exp c exp2 in
-    match (t1,t2) with
-    | TRef (RArray t), TInt -> t
-    | _ -> type_error e ("expression does not match")
+    match typecheck_exp c exp1 with
+    | TRef (RArray t) -> (
+      if (typecheck_exp c exp2) = TInt then t else type_error e ("index is not an integer")
+    )
+    | _ -> type_error e ("not an array")
   )
-  | Length(exp) -> (
+
+  (* TYP_LENGTH *)
+  | Length (exp) -> (
     match typecheck_exp c exp with
-    | TRef(RArray _) -> TInt
-    | _ -> type_error e ("________")
+    | TRef (RArray _) -> TInt
+    | _ -> type_error e ("not an array")
   )
+
+  (* TYP_STRUCTEX *)
+  | CStruct (s, inits) -> (
+     match lookup_struct_option s c with
+     | Some fields -> (
+        if not (List.length fields = List.length inits) then
+          type_error e ("number of fields does not match")
+        else
+          let check_init ((id, exp): id * exp node) (field: Ast.field) : unit =
+            if id <> field.fieldName then
+              type_error exp ("unexpected field " ^ id)
+            else if not (subtype c (typecheck_exp c exp) field.ftyp) then
+              type_error exp ("unexpected type for field " ^ id)
+          in
+          List.iter2 check_init
+                    (List.sort (fun (id1, _) (id2, _) -> String.compare id1 id2) inits)
+                    (List.sort (fun f1 f2 -> String.compare f1.fieldName f2.fieldName) fields);
+          TRef (RStruct s)
+     )
+     | None -> type_error e ("struct " ^ s ^ " is not defined")
+  )
+
+  (* TYP_FIELD *)
   | Proj (exp, x) -> (
     match typecheck_exp c exp with
-    | TRef(RStruct t) -> (
-       match lookup_field_option t x c with
-        | Some t -> t
-        | None -> type_error e ("field undefined")
+    | TRef (RStruct t) -> (
+      match lookup_field_option t x c with
+      | Some t -> t
+      | None -> type_error e ("field " ^ x ^ " undefined")
     )
-    | _ -> type_error e ("type does not match")
+    | _ -> type_error e ("not a struct")
   )
+
+  (* TYP_CALL *)
+  | Call (exp, args) -> (
+    match typecheck_exp c exp with
+    | TRef (RFun (t_args, RetVal t)) -> (
+      if not (List.length t_args = List.length args) then
+        type_error e ("number of arguments does not match")
+      else
+        let check_exp arg t_arg =
+          if not (subtype c (typecheck_exp c arg) t_arg)
+          then type_error e ("invalid type of argument value")
+        in
+        List.iter2 check_exp args t_args;
+        t
+    )
+    | _ -> type_error e ("not a function")
+  )
+
+  | Bop (bop, exp1, exp2) -> (
+    let t1 = typecheck_exp c exp1 in
+    let t2 = typecheck_exp c exp2 in
+    match bop with
+    | Eq | Neq -> (
+      (* TYP_EQ & TYP_NEQ *)
+      if not (subtype c t1 t2 && subtype c t2 t1)
+      then type_error e ("values of different types are compared")
+      else TBool
+    )
+    | _ -> (
+      (* TYP_BOP *)
+      let (t1', t2', t) = typ_of_binop bop in
+      if (t1 <> t1') || (t2 <> t2')
+      then type_error e ("invalid type of bop operand")
+      else t
+    )
+  )
+
+  (* TYP_UOP *)
   | Uop (uop, exp) -> (
-    let (t', t) = typ_of_unop uop in
+    let (_, t) = typ_of_unop uop in
     if typecheck_exp c exp <> t
     then type_error e ("invalid type of uop operand")
     else t
   )
-  | Bop (exp1, bop, exp2) -> (
-    let (t1, t2, t) = typ_of_binop bop in
-    if (typecheck_exp c exp1 <> t1) || (typecheck_exp c exp2 <> t2)
-    then type_error e ("invalid type of bop operand")
-    else t
-  )
-  | _ -> failwith "todo: implement typecheck_exp"
+
 
 (* statements --------------------------------------------------------------- *)
 
@@ -382,16 +452,16 @@ and typecheck_stmts (tc: Tctxt.t) (b: Ast.stmt node list) (to_ret: ret_ty) : Tct
 
 (* struct type declarations ------------------------------------------------- *)
 (* Here is an example of how to implement the TYP_TDECLOK rule, which is 
-   is needed elswhere in the type system.
+   is needed elsewhere in the type system.
  *)
 
-(* Helper function to look for duplicate field names *)
-let rec check_dups fs =
-  match fs with
-  | [] -> false
-  | h :: t -> (List.exists (fun x -> x.fieldName = h.fieldName) t) || check_dups t
-
-let typecheck_tdecl (tc : Tctxt.t) id fs  (l : 'a Ast.node) : unit =
+let typecheck_tdecl (tc: Tctxt.t) (id) (fs: field list) (l: 'a Ast.node) : unit =
+  (* Helper function to look for duplicate field names *)
+  let rec check_dups fs =
+    match fs with
+    | [] -> false
+    | h :: t -> (List.exists (fun x -> x.fieldName = h.fieldName) t) || check_dups t
+  in
   if check_dups fs
   then type_error l ("Repeated fields in " ^ id) 
   else List.iter (fun f -> typecheck_ty l tc f.ftyp) fs
@@ -403,8 +473,21 @@ let typecheck_tdecl (tc : Tctxt.t) id fs  (l : 'a Ast.node) : unit =
     - typechecks the body of the function (passing in the expected return type
     - checks that the function actually returns
 *)
-let typecheck_fdecl (tc : Tctxt.t) (f : Ast.fdecl) (l : 'a Ast.node) : unit =
-  failwith "todo: typecheck_fdecl"
+let typecheck_fdecl (tc: Tctxt.t) (f: Ast.fdecl) (l: 'a Ast.node) : unit =
+  let rec process_args (tc: Tctxt.t) (args: (ty * id) list) : Tctxt.t =
+    match args with
+    | [] -> tc
+    | (ty, id) :: t -> (
+      if List.exists (fun (ty', id') -> (id' = id)) t then
+        type_error l ("Repeated arguments in " ^ f.fname)
+      else
+        process_args (add_local tc id ty) t
+    )
+  in
+  let tc' = process_args tc f.args in
+  let must_ret = typecheck_block tc' f.body f.frtyp in
+  if not must_ret then
+    type_error l ("function " ^ f.fname ^ " may not return")
 
 (* creating the typchecking context ----------------------------------------- *)
 
@@ -433,20 +516,57 @@ let typecheck_fdecl (tc : Tctxt.t) (f : Ast.fdecl) (l : 'a Ast.node) : unit =
    NOTE: global initializers may mention function identifiers as
    constants, but can't mention other global values *)
 
-let create_struct_ctxt (p:Ast.prog) : Tctxt.t =
-  failwith "todo: create_struct_ctxt"
+let create_struct_ctxt (p: Ast.prog) : Tctxt.t =
+  let rec create_struct_ctxt_aux (tc: Tctxt.t) (p: Ast.prog) : Tctxt.t =
+    match p with
+    | [] -> tc
+    | (Gtdecl ({elt = (id, fs)} as l)) :: p' -> (
+      if (lookup_struct_option id tc) <> None then
+         type_error l ("Repeated struct definition " ^ id)
+      else
+        create_struct_ctxt_aux (add_struct tc id fs) p'
+    )
+    | _ :: p' -> create_struct_ctxt_aux tc p'
+  in
+  create_struct_ctxt_aux Tctxt.empty p
 
-let create_function_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
-  failwith "todo: create_function_ctxt"
+let rec create_function_ctxt (tc: Tctxt.t) (p: Ast.prog) : Tctxt.t =
+  match p with
+  | [] -> tc
+  | (Gfdecl ({elt = f} as l)) :: p' -> (
+    (* TYP_FTYP *)
+    let _ = typecheck_ret_ty l tc f.frtyp in
+    let arg_tys = List.map (fun (ty, id) -> typecheck_ty l tc ty; ty) f.args in
+    let t = TRef (RFun (arg_tys, f.frtyp)) in
+    (* TYP_FFDECL remaining *)
+    if (lookup_global_option f.fname tc) <> None then
+      type_error l ("Repeated global identifier " ^ f.fname)
+    else
+      create_function_ctxt (add_global tc f.fname t) p'
+  )
+  | _ :: p' -> create_function_ctxt tc p'
 
-let create_global_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
-  failwith "todo: create_function_ctxt"
+
+let create_global_ctxt (tc: Tctxt.t) (p: Ast.prog) : Tctxt.t =
+  let fold_gdecl (ret_tc: Tctxt.t) (d: Ast.decl) : Tctxt.t =
+    match d with
+    | Gvdecl ({elt = g} as l) -> (
+      (* TODO: test this *)
+      let t = typecheck_exp tc (* NOTE: original tc without global variables*) g.init in
+      if (lookup_global_option g.name ret_tc) <> None then
+        type_error l ("Repeated global identifier " ^ g.name)
+      else
+        add_global ret_tc g.name t
+    )
+    | _ -> ret_tc
+  in
+  List.fold_left fold_gdecl tc p
 
 
 (* This function implements the |- prog and the H ; G |- prog 
    rules of the oat.pdf specification.   
 *)
-let typecheck_program (p:Ast.prog) : unit =
+let typecheck_program (p: Ast.prog) : unit =
   let sc = create_struct_ctxt p in
   let fc = create_function_ctxt sc p in
   let tc = create_global_ctxt fc p in
