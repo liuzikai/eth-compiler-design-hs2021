@@ -429,6 +429,14 @@ let rec typecheck_stmt (tc: Tctxt.t) (s: Ast.stmt node) (to_ret: ret_ty) : Tctxt
     | _ -> type_error s ("if? expression does not have type ref?")
   )
 
+  (* TYP_WHILE *)
+  | While (exp, block) -> (
+    if (typecheck_exp tc exp <> TBool) then
+      type_error s ("while condition does not have type bool")
+    else
+      let _ = typecheck_block tc block to_ret in
+      tc (* L *), false (* might not return*)
+  )
 
   | _ -> failwith "todo: implement typecheck_stmt"
 
