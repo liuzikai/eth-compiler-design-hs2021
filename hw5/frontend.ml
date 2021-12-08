@@ -327,7 +327,8 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
       ]
 
   | Ast.Index (e, i) ->
-    let ans_ty, ptr_op, code = cmp_exp_lhs tc c exp in
+    let ptr_ans_ty, ptr_op, code = cmp_exp_lhs tc c exp in
+    let ans_ty = decode_ptr_ty ptr_ans_ty in
     let ans_id = gensym "index" in
     ans_ty, Id ans_id, code >:: I(ans_id, Load(Ptr ans_ty, ptr_op))
 
@@ -426,7 +427,8 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
     s_ty, s_op, alloc_code >@ fields_code
 
   | Ast.Proj (e, id) ->
-    let ans_ty, ptr_op, code = cmp_exp_lhs tc c exp in
+    let ptr_ans_ty, ptr_op, code = cmp_exp_lhs tc c exp in
+    let ans_ty = decode_ptr_ty ptr_ans_ty in
     let ans_id = gensym "proj" in
     ans_ty, Id ans_id, code >:: I(ans_id, Load(Ptr ans_ty, ptr_op))
 
@@ -453,7 +455,7 @@ and cmp_exp_lhs (tc : TypeCtxt.t) (c:Ctxt.t) (e:exp node) : Ll.ty * Ll.operand *
     let f_ty, f_ind = TypeCtxt.lookup_field_name s_id f_id tc in
     let ll_f_ty = cmp_ty tc f_ty in
     let ptr_id = gensym "field" in
-    (ll_f_ty), (Id ptr_id),
+    (Ptr ll_f_ty), (Id ptr_id),
     s_code >:: (I (ptr_id, Gep (s_ty, s_op, [i64_op_of_int 0; Const f_ind])))
 
 
@@ -474,7 +476,7 @@ and cmp_exp_lhs (tc : TypeCtxt.t) (c:Ctxt.t) (e:exp node) : Ll.ty * Ll.operand *
       | Ptr (Struct [_; Array (_,t)]) -> t 
       | _ -> failwith "Index: indexed into non pointer" in
     let ptr_id, tmp_id = gensym "index_ptr", gensym "tmp" in
-    ans_ty, (Id ptr_id),
+    (Ptr ans_ty), (Id ptr_id),
     arr_code >@ ind_code >@ lift
       [ tmp_id, Bitcast (arr_ty, arr_op, Ptr (I64))
       ; gensym "result", Call (Void, Gid "oat_assert_array_length", [(Ptr I64, Id tmp_id); (I64, ind_op)])
@@ -525,9 +527,10 @@ and cmp_stmt (tc : TypeCtxt.t) (c:Ctxt.t) (rt:Ll.ty) (stmt:Ast.stmt node) : Ctxt
          >:: I("",     Store (ll_ty, init_op, Id res_id))
      
   | Ast.Assn (path ,e) ->
-     let _, pop, path_code = cmp_exp_lhs tc c path in
-     let ll_ty, eop, exp_code = cmp_exp tc c e in
-     c, path_code >@ exp_code >:: I("", (Store (ll_ty, eop, pop)))
+     let lhs_ty, pop, path_code = cmp_exp_lhs tc c path in
+     let exp_ty = decode_ptr_ty lhs_ty in
+     let eop, exp_code = cmp_exp_as tc c e exp_ty in
+     c, path_code >@ exp_code >:: I("", (Store (exp_ty, eop, pop)))
 
   | Ast.If (guard, st1, st2) -> 
      let guard_ty, guard_op, guard_code = cmp_exp tc c guard in
