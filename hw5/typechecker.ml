@@ -478,15 +478,17 @@ and typecheck_block (tc: Tctxt.t) (b: Ast.block) (to_ret: ret_ty) : bool =
 (* H;G;L0;rt |-ss stmt1 .. stmtn => Ln;returns, TYP_STMTS *)
 and typecheck_stmts (tc: Tctxt.t) (b: Ast.stmt node list) (to_ret: ret_ty) : Tctxt.t * bool =
   match b with
+  | [] -> tc, false  (* only when b is empty at entering *)
   | s :: b' -> (
     let tc', must_ret = typecheck_stmt tc s to_ret in
-    (* TODO: should we check must_ret here? *)
     match b' with
-    | [] -> tc', must_ret
-    | _ -> typecheck_stmts tc' b' to_ret
+    | [] -> tc', must_ret  (* no more stmt, here is the last *)
+    | _ -> (
+      if must_ret
+      then type_error s ("block returns early (dead code)")
+      else typecheck_stmts tc' b' to_ret
+    )
   )
-  | _ -> failwith "typecheck_block: unexpected empty b"
-
 
 
 (* struct type declarations ------------------------------------------------- *)
@@ -570,6 +572,13 @@ let create_struct_ctxt (p: Ast.prog) : Tctxt.t =
   create_struct_ctxt_aux Tctxt.empty p
 
 let rec create_function_ctxt (tc: Tctxt.t) (p: Ast.prog) : Tctxt.t =
+  (* Add built-in functions *)
+  let fold_buildin tc (id, (args, ret_ty)) =
+    add_global tc id (TRef (RFun (args, ret_ty)))
+  in
+  let tc = List.fold_left fold_buildin tc builtins in
+
+  (* Add user-defined functions *)
   match p with
   | [] -> tc
   | (Gfdecl ({elt = f} as l)) :: p' -> (
