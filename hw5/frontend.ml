@@ -177,6 +177,25 @@ let i1_op_of_bool b   = Ll.Const (if b then 1L else 0L)
 let i64_op_of_int i   = Ll.Const (Int64.of_int i)
 
 
+(* Decode a Ptr type to the type it is referencing *)
+let decode_ptr_ty (ptr_ty: Ll.ty) : Ll.ty =
+  match ptr_ty with
+  | Ptr ty -> ty
+  | _ -> failwith @@ "decode_ptr_ty: ptr_ty is not Ptr"
+
+
+(* Decode wrapper type and element type from the return type of array expression
+   Example: { i64, [0 x T] }* -> { i64, [0 x T] }, T                             *)
+let decode_arr_ty (arr_struct_ptr_ty: Ll.ty) : Ll.ty * Ll.ty =
+  let arr_struct_ty = decode_ptr_ty arr_struct_ptr_ty in
+  match arr_struct_ty with
+  | Struct (_ :: arr_ty :: []) -> (
+    match arr_ty with
+    | Array (_, elem_ty) -> arr_struct_ty, elem_ty
+    | _ -> failwith "decode_arr_ty: unexpected arr_ty"
+  )
+  | _ -> failwith "decode_arr_ty: unexpected arr_struct_ty"
+
 
 (* Generate code to allocate an array of source type TRef (RArray t) of the
    given size. Note "size" is an operand whose value can be computed at
@@ -299,10 +318,13 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
       | Ptr (Struct [_; Array (_, t)]) -> t
       | _ -> failwith "Length: on non array"
     in
-    let len_id = gensym "len" in
-    ans_ty, (Id len_id),
+    let len_ptr_uid = gensym "length_ptr" in
+    let len_uid = gensym "length" in
+    ans_ty, (Id len_uid),
     arr_code >@ lift
-      [ len_id, Gep (arr_ty, arr_op, [i64_op_of_int 0; i64_op_of_int 0]) ]
+      [ len_ptr_uid, Gep (arr_ty, arr_op, [i64_op_of_int 0; i64_op_of_int 0])
+      ; len_uid, Load (Ptr (I64), Id len_ptr_uid)
+      ]
 
   | Ast.Index (e, i) ->
     let ans_ty, ptr_op, code = cmp_exp_lhs tc c exp in
@@ -341,19 +363,20 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
     (* All tys (TBool, TInt, TRef, TNullRef) are stored as I64 *)
     let _, size_op, size_code = cmp_exp tc c e1 in
     let arr_ty, arr_op, alloc_code = oat_alloc_array tc elt_ty size_op in
+    let _, elt_ty = decode_arr_ty arr_ty in
 
     let x_id = gensym x in
     let c' = Ctxt.add c x (Ptr I64, Id x_id) in
 
-    let begin_lbl = gensym "while_begin" in
-    let while_lbl = gensym "while_body" in
-    let end_lbl = gensym "while_end" in
+    let begin_lbl = gensym "newarr_begin" in
+    let while_lbl = gensym "newarr_body" in
+    let end_lbl = gensym "newarr_end" in
 
-    let cond_id = gensym "cond" in
-    let ptr_id = gensym "ptr" in
-    let ind_id, ind_id2 = gensym "ind", gensym "ind" in
+    let cond_id = gensym "newarr_cond" in
+    let ptr_id = gensym "newarr_ptr" in
+    let idx_id, idx_id2 = gensym "newarr_idx", gensym "newarr_idx" in
 
-    let value_ty, value_op, value_code = cmp_exp tc c' e2 in
+    let value_op, value_code = cmp_exp_as tc c' e2 elt_ty in
 
     arr_ty, arr_op, size_code >@ alloc_code
       (* Declaration *)
@@ -363,19 +386,19 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
       >:: (T (Br begin_lbl))
       >:: (L begin_lbl)
       (* Condition *)
-      >:: (I (ind_id, Load (Ptr I64, Id x_id)))
-      >:: (I (cond_id, Icmp (Slt, I64, Id ind_id, size_op)))
+      >:: (I (idx_id, Load (Ptr I64, Id x_id)))
+      >:: (I (cond_id, Icmp (Slt, I64, Id idx_id, size_op)))
       >:: (T (Cbr (Id cond_id, while_lbl, end_lbl)))
       >:: (L while_lbl)
       (* Evaluate exp2 *)
       >@  value_code
       (* Index *)
-      >:: (I (ptr_id, Gep (arr_ty, arr_op, [i64_op_of_int 0; i64_op_of_int 1; Id ind_id])))
+      >:: (I (ptr_id, Gep (arr_ty, arr_op, [i64_op_of_int 0; i64_op_of_int 1; Id idx_id])))
       (* Assign *)
-      >:: (I ("", Store (value_ty, value_op, Id ptr_id)))
+      >:: (I ("", Store (elt_ty, value_op, Id ptr_id)))
       (* Increment *)
-      >:: (I (ind_id2, Binop (Add, I64, Id ind_id, Const 1L)))
-      >:: (I ("", Store (I64, Id ind_id2, Id x_id)))
+      >:: (I (idx_id2, Binop (Add, I64, Id idx_id, Const 1L)))
+      >:: (I ("", Store (I64, Id idx_id2, Id x_id)))
       (* Loop back *)
       >:: (T (Br begin_lbl))
       >:: (L end_lbl)
@@ -554,7 +577,7 @@ and cmp_stmt (tc : TypeCtxt.t) (c:Ctxt.t) (rt:Ll.ty) (stmt:Ast.stmt node) : Ctxt
        >:: L null_lbl
        >@  cmp_block tc c rt null
        >:: T (Br merge_lbl)
-       >:: L null_lbl
+       >:: L merge_lbl
 
   | Ast.While (guard, body) ->
      let guard_ty, guard_op, guard_code = cmp_exp tc c guard in
