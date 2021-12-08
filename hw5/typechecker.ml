@@ -348,7 +348,7 @@ let typecheck_vdecl (s: Ast.stmt node) (tc: Tctxt.t) ((id, exp): Ast.vdecl) : Tc
 
 
 (* H;G;L0 |- vdecls => Li *)
-let rec typecheck_vdecls (s: Ast.stmt node) (tc: Tctxt.t) (vdecls: Ast.vdecl list) : Tctxt.t =
+let typecheck_vdecls (s: Ast.stmt node) (tc: Tctxt.t) (vdecls: Ast.vdecl list) : Tctxt.t =
   List.fold_left (typecheck_vdecl s) tc vdecls
 
 
@@ -439,16 +439,20 @@ let rec typecheck_stmt (tc: Tctxt.t) (s: Ast.stmt node) (to_ret: ret_ty) : Tctxt
   )
 
   (* TYP_ FOR *)
-  | For(vdecls, exp_opt, stmt_opt, block) -> (
-    let tc_with_L2 = List.fold_left (typecheck_vdecl s) tc vdecls in
-    match exp_opt, stmt_opt with
-    | Some exp, Some stmt -> if (typecheck_exp tc_with_L2 exp <> TBool) then
-                                type_error s ("expression does not have type bool")
-                             else if (snd (typecheck_stmt tc_with_L2 stmt to_ret)) then
-                                type_error s ("for loop stmt error")
-                             else let _ = typecheck_block tc_with_L2 block to_ret in
-                                tc (* L *), false (* might not return*)
-    | _ -> tc (* L *), false (* might not return*)
+  | For (vdecls, exp_opt, stmt_opt, block) -> (
+    let tc_with_l2 = typecheck_vdecls s tc vdecls in
+    let _ = match exp_opt with
+      | Some exp -> if (typecheck_exp tc_with_l2 exp <> TBool) then
+                      type_error s ("for loop condition does not have type bool")
+      | None -> ()
+    in
+    let _ = match stmt_opt with
+      | Some stmt -> if (snd (typecheck_stmt tc_with_l2 stmt to_ret)) then
+                        type_error s ("for loop stmt definitely returns")
+      | None -> ()
+    in
+    let _ = typecheck_block tc_with_l2 block to_ret in
+    tc (* L *), false (* might not return*)
   )
 
   (* TYP_ RETT *)
