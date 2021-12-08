@@ -572,12 +572,6 @@ let create_struct_ctxt (p: Ast.prog) : Tctxt.t =
   create_struct_ctxt_aux Tctxt.empty p
 
 let rec create_function_ctxt (tc: Tctxt.t) (p: Ast.prog) : Tctxt.t =
-  (* Add built-in functions *)
-  let fold_buildin tc (id, (args, ret_ty)) =
-    add_global tc id (TRef (RFun (args, ret_ty)))
-  in
-  let tc = List.fold_left fold_buildin tc builtins in
-
   (* Add user-defined functions *)
   match p with
   | [] -> tc
@@ -616,7 +610,14 @@ let create_global_ctxt (tc: Tctxt.t) (p: Ast.prog) : Tctxt.t =
 *)
 let typecheck_program (p: Ast.prog) : unit =
   let sc = create_struct_ctxt p in
-  let fc = create_function_ctxt sc p in
+
+  (* Add built-in functions *)
+  let fold_buildin (tc) (id, (args, ret_ty)) =
+    add_global tc id (TRef (RFun (args, ret_ty)))
+  in
+  let bfc = List.fold_left fold_buildin sc builtins in
+
+  let fc = create_function_ctxt bfc p in
   let tc = create_global_ctxt fc p in
   List.iter (fun p ->
     match p with
