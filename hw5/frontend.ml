@@ -23,7 +23,7 @@ type elt =
   | G of gid * Ll.gdecl     (* hoisted globals (usually strings) *)
   | E of uid * Ll.insn      (* hoisted entry block instructions *)
 
-type stream = elt list
+type stream = elt list  (* stream is in reversed order of the actual flow *)
 let ( >@ ) x y = y @ x
 let ( >:: ) x y = y :: x
 let lift : (uid * insn) list -> stream = List.rev_map (fun (x,i) -> I (x,i))
@@ -118,7 +118,7 @@ end
 (* compiling OAT types ------------------------------------------------------ *)
 
 (* The mapping of source types onto LLVMlite is straightforward. Booleans and ints
-   are represented as the the corresponding integer types. OAT strings are 
+   are represented as the corresponding integer types. OAT strings are
    pointers to bytes (I8). Arrays are the most interesting type: they are
    represented as pointers to structs where the first component is the number
    of elements in the following array.
@@ -142,7 +142,7 @@ and cmp_fty ct (ts, r) : Ll.fty =
 
 and cmp_rty ct : Ast.rty -> Ll.ty = function
   | Ast.RString  -> I8
-  | Ast.RArray u -> Struct [I64; Array(0, cmp_ty ct u)]
+  | Ast.RArray u -> Struct [I64; Array (0, cmp_ty ct u)]
   | Ast.RStruct r -> Namedt r
   | Ast.RFun (ts, t) -> 
       let args, ret = cmp_fty ct (ts, t) in
@@ -166,7 +166,7 @@ let gensym : string -> string =
   let c = ref 0 in
   fun (s:string) -> incr c; Printf.sprintf "_%s%d" s (!c)
 
-(* Amount of space an Oat type takes when stored in the satck, in bytes.  
+(* Amount of space an Oat type takes when stored in the stack, in bytes.
    Note that since structured values are manipulated by reference, all
    Oat values take 8 bytes on the stack.
 *)
@@ -208,27 +208,27 @@ let oat_alloc_struct ct (id: Ast.id) : Ll.ty * operand * stream =
     ; ans_id, Bitcast (raw_ty, Id raw_id, ans_ty) ]
 
 
-let cmp_binop t (b : Ast.binop) : Ll.operand -> Ll.operand -> Ll.insn  =
-  let ib b op1 op2 = Ll.Binop (b, t, op1, op2) in
-  let ic c op1 op2 = Ll.Icmp (c, t, op1, op2) in
-  match b with
-  | Ast.Add  -> ib Ll.Add
-  | Ast.Mul  -> ib Ll.Mul
-  | Ast.Sub  -> ib Ll.Sub
-  | Ast.And  -> ib Ll.And
-  | Ast.IAnd -> ib Ll.And 
-  | Ast.IOr  -> ib Ll.Or
-  | Ast.Or   -> ib Ll.Or
-  | Ast.Shl  -> ib Ll.Shl
-  | Ast.Shr  -> ib Ll.Lshr
-  | Ast.Sar  -> ib Ll.Ashr
+let cmp_binop_to_bop : Ast.binop -> Ll.bop = function
+  | Add  -> Ll.Add
+  | Sub  -> Ll.Sub
+  | Mul  -> Ll.Mul
+  | And  -> Ll.And  (* TODO: really? *)
+  | Or   -> Ll.Or
+  | IAnd -> Ll.And
+  | IOr  -> Ll.Or
+  | Shl  -> Ll.Shl
+  | Shr  -> Ll.Lshr
+  | Sar  -> Ll.Ashr
+  | _ -> failwith "cmp_binop_to_bop: invalid binop"
 
-  | Ast.Eq   -> ic Ll.Eq
-  | Ast.Neq  -> ic Ll.Ne
-  | Ast.Lt   -> ic Ll.Slt
-  | Ast.Lte  -> ic Ll.Sle
-  | Ast.Gt   -> ic Ll.Sgt
-  | Ast.Gte  -> ic Ll.Sge
+let cmp_binop_to_cnd : Ast.binop -> Ll.cnd = function
+  | Eq  -> Ll.Eq
+  | Neq -> Ll.Ne
+  | Lt  -> Ll.Slt
+  | Lte -> Ll.Sle
+  | Gt  -> Ll.Sgt
+  | Gte -> Ll.Sge
+  | _ -> failwith "cmp_binop_to_cnd: invalid binop"
 
 (* Compiles an expression exp in context c, outputting the Ll operand that will
    recieve the value of the expression, and the stream of instructions
@@ -248,13 +248,25 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
     >:: G(gid, (str_typ, GString s))
     >:: I(uid, Gep(Ptr str_typ, Gid gid, [Const 0L; Const 0L;]))
 
-  | Ast.Bop (bop, e1, e2) ->
-    let t, _, ret_ty = typ_of_binop bop in
-    let ll_t = cmp_ty tc t in
-    let op1, code1 = cmp_exp_as tc c e1 ll_t in
-    let op2, code2 = cmp_exp_as tc c e2 ll_t in
-    let ans_id = gensym "bop" in 
-    cmp_ty tc ret_ty, Id ans_id, code1 >@ code2 >:: I(ans_id, cmp_binop ll_t bop op1 op2)
+  | Ast.Bop (binop, op1, op2) ->
+    let uid = gensym "bop" in
+
+    let op1_ty, op1_operand, op1_stream = cmp_exp tc c op1 in
+    let op2_ty, op2_operand, op2_stream = cmp_exp tc c op2 in
+    let op_ty = op1_ty in  (* with typechecker, op1_ty and op1_ty must be equal, denoted as op_ty *)
+
+    let expected_op_ast_ty, _, res_ast_ty = typ_of_binop binop in
+    let res_ty = cmp_ty tc res_ast_ty in
+    let insn : Ll.insn = (
+      if expected_op_ast_ty = res_ast_ty
+      (* Here we use op_ty (type of operands) to generate instruction, to support pointer comparison *)
+      then Binop (cmp_binop_to_bop binop, op_ty, op1_operand, op2_operand)
+      else Icmp (cmp_binop_to_cnd binop, op_ty, op1_operand, op2_operand)
+    ) in
+    (* For the return type, we use the expected type from binop.
+       Comparing pointers generates boolean, which matches the expected res_ty.
+       If the input program performs AND, OR, etc. on pointers, the error will be in LLVM-IR. *)
+    res_ty, (Id uid), op1_stream >@ op2_stream >:: (I (uid, insn))
 
   | Ast.Uop (uop, e) ->
     let t, ret_ty = typ_of_unop uop in
@@ -430,7 +442,10 @@ and cmp_exp_lhs (tc : TypeCtxt.t) (c:Ctxt.t) (e:exp node) : Ll.ty * Ll.operand *
   *)
   (* TODO: test *)
   | Ast.Index (e, i) ->
+    (* Evaluate expression (not reference) of the array*)
     let arr_ty, arr_op, arr_code = cmp_exp tc c e in
+
+    (* Evaluate index *)
     let _, ind_op, ind_code = cmp_exp tc c i in
     let ans_ty = match arr_ty with 
       | Ptr (Struct [_; Array (_,t)]) -> t 
@@ -619,7 +634,7 @@ let cmp_global_ctxt (tc : TypeCtxt.t) (c:Ctxt.t) (p:Ast.prog) : Ctxt.t =
     | CBool b -> I1
     | CInt i  -> I64
     | CStr s  -> Ptr (str_arr_ty s)
-    | CArr (u, cs) -> Ptr (Struct [I64; Array(List.length cs, cmp_ty tc u)])
+    | CArr (u, cs) -> Ptr (Struct [I64; Array(0, cmp_ty tc u)])
     | x -> failwith ( "bad global initializer: " ^ (Astlib.string_of_exp (no_loc x)))
   in
   List.fold_left (fun c -> function
@@ -680,18 +695,30 @@ let rec cmp_gexp c (tc : TypeCtxt.t) (e:Ast.exp node) : Ll.gdecl * (Ll.gid * Ll.
     let ll_ty = str_arr_ty s in
     (Ptr ll_ty, GGid gid), [gid, (ll_ty, GString s)]
 
-  | CArr (u, cs) ->
-    let elts, gs = List.fold_right
-        (fun cst (elts, gs) ->
-           let gd, gs' = cmp_gexp c tc cst in
-           gd::elts, gs' @ gs) cs ([], [])
+  | CArr (ty, vals) ->
+
+    let val_count = List.length vals in
+    let arr_struct_gid = gensym "global_arr" in
+    let arr_body_ty = Array (val_count, cmp_ty tc ty) in
+    let actual_arr_struct_ty = Struct [I64; arr_body_ty] in
+    let abstract_arr_struct_ty = cmp_rty tc (RArray ty) in
+
+    let fold_val ((init_list: Ll.gdecl list), (more_gdecls: (Ll.gid * Ll.gdecl) list)) (e: Ast.exp node) =
+      let init, more_gdecls' = cmp_gexp c tc e in
+      init :: init_list,  (* reversed *)
+      more_gdecls @ more_gdecls'
     in
-    let len = List.length cs in
-    let ll_u = cmp_ty tc u in 
-    let gid = gensym "global_arr" in
-    let arr_t = Struct [ I64; Array(len, ll_u) ] in
-    let arr_i = GStruct [ I64, GInt (Int64.of_int len); Array(len, ll_u), GArray elts ] in
-    (Ptr arr_t, GGid gid), (gid, (arr_t, arr_i))::gs
+    let init_list, more_gdecls = List.fold_left fold_val ([], []) vals in
+    let init_list = List.rev init_list (* reverse *) in
+
+    (* Pointer to the array structure *)
+    (Ptr abstract_arr_struct_ty, GBitcast (Ptr actual_arr_struct_ty, GGid arr_struct_gid, Ptr abstract_arr_struct_ty)),
+
+    (* Actual element storage *)
+    (arr_struct_gid, (actual_arr_struct_ty,
+      GStruct [ I64, GInt (Int64.of_int val_count)
+              ; arr_body_ty, GArray init_list])
+    ) :: more_gdecls
 
   (* STRUCT TASK (done): Complete this code that generates the global initializers for a struct value. *)
   (* TODO: test *)
