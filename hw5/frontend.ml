@@ -271,12 +271,21 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
       | _ -> failwith "broken invariant: identifier not a pointer"
     end
 
-  (* ARRAY TASK: complete this case to compilet the length(e) expression.
+  (* ARRAY TASK (done): complete this case to compile the length(e) expression.
        The emitted code should yield the integer stored as part 
        of the array struct representation.
   *)
+  (* TODO: test *)
   | Ast.Length e ->
-    failwith "todo:implement Ast.Length case"
+    let arr_ty, arr_op, arr_code = cmp_exp tc c e in
+    let ans_ty = match arr_ty with
+      | Ptr (Struct [_; Array (_, t)]) -> t
+      | _ -> failwith "Length: on non array"
+    in
+    let len_id = gensym "len" in
+    ans_ty, (Id len_id),
+    arr_code >@ lift
+      [ len_id, Gep (arr_ty, arr_op, [i64_op_of_int 0; i64_op_of_int 0]) ]
 
   | Ast.Index (e, i) ->
     let ans_ty, ptr_op, code = cmp_exp_lhs tc c exp in
@@ -300,7 +309,7 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
     let ind_code = List.(fold_left add_elt [] @@ mapi (fun i e -> i, e) cs) in
     arr_ty, arr_op, alloc_code >@ ind_code
 
-  (* ARRAY TASK: Modify the compilation of the NewArr construct to implement the 
+  (* ARRAY TASK (done): Modify the compilation of the NewArr construct to implement the
      initializer:
          - the initializer is a loop that uses id as the index
          - each iteration of the loop the code evaluates e2 and assigns it
@@ -310,10 +319,48 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
      you could write the loop using abstract syntax and then call cmp_stmt to
      compile that into LL code...
   *)
-  | Ast.NewArr (elt_ty, e1, id, e2) ->    
+  | Ast.NewArr (elt_ty, e1, x, e2) ->
     let _, size_op, size_code = cmp_exp tc c e1 in
     let arr_ty, arr_op, alloc_code = oat_alloc_array tc elt_ty size_op in
+
+    let x_id = gensym x in
+    let c' = Ctxt.add c x (Ptr I64, Id x_id) in
+
+    let begin_lbl = gensym "while_begin" in
+    let while_lbl = gensym "while_body" in
+    let end_lbl = gensym "while_end" in
+
+    let cond_id = gensym "cond" in
+    let ptr_id = gensym "ptr" in
+    let ind_id, ind_id2 = gensym "ind", gensym "ind" in
+
+    let value_ty, value_op, value_code = cmp_exp tc c' e2 in
+
     arr_ty, arr_op, size_code >@ alloc_code
+      (* Declaration *)
+      >:: (E (x_id, Alloca I64))
+      >:: (I ("", Store (I64, Const 0L, Id x_id)))
+      (* While loop head *)
+      >:: (T (Br begin_lbl))
+      >:: (L begin_lbl)
+      (* Condition *)
+      >:: (I (ind_id, Load (Ptr I64, Id x_id)))
+      >:: (I (cond_id, Icmp (Slt, I64, Id ind_id, size_op)))
+      >:: (T (Cbr (Id cond_id, while_lbl, end_lbl)))
+      >:: (L while_lbl)
+      (* Evaluate exp2 *)
+      >@  value_code
+      (* Index *)
+      >:: (I (ptr_id, Gep (arr_ty, arr_op, [i64_op_of_int 0; i64_op_of_int 1; Id ind_id])))
+      (* Assign *)
+      >:: (I ("", Store (value_ty, value_op, Id ptr_id)))
+      (* Increment *)
+      >:: (I (ind_id2, Binop (Add, I64, Id ind_id, Const 1L)))
+      >:: (I ("", Store (I64, Id ind_id2, Id x_id)))
+      (* Loop back *)
+      >:: (T (Br begin_lbl))
+      >:: (L end_lbl)
+
 
    (* STRUCT TASK: complete this code that compiles struct expressions.
       For each field component of the struct
@@ -347,12 +394,13 @@ and cmp_exp_lhs (tc : TypeCtxt.t) (c:Ctxt.t) (e:exp node) : Ll.ty * Ll.operand *
     failwith "todo: Ast.Proj case of cmp_exp_lhs"
 
 
-  (* ARRAY TASK: Modify this index code to call 'oat_assert_array_length' before doing the 
+  (* ARRAY TASK (done): Modify this index code to call 'oat_assert_array_length' before doing the
      GEP calculation. This should be very straightforward, except that you'll need to use a Bitcast.
      You might want to take a look at the implementation of 'oat_assert_array_length'
      in runtime.c.   (That check is where the infamous "ArrayIndexOutOfBounds" exception would 
      be thrown...)
   *)
+  (* TODO: test *)
   | Ast.Index (e, i) ->
     let arr_ty, arr_op, arr_code = cmp_exp tc c e in
     let _, ind_op, ind_code = cmp_exp tc c i in
@@ -362,7 +410,10 @@ and cmp_exp_lhs (tc : TypeCtxt.t) (c:Ctxt.t) (e:exp node) : Ll.ty * Ll.operand *
     let ptr_id, tmp_id = gensym "index_ptr", gensym "tmp" in
     ans_ty, (Id ptr_id),
     arr_code >@ ind_code >@ lift
-      [ptr_id, Gep(arr_ty, arr_op, [i64_op_of_int 0; i64_op_of_int 1; ind_op]) ]
+      [ tmp_id, Bitcast (arr_ty, arr_op, Ptr (I64))
+      ; gensym "result", Call (Void, Gid "oat_assert_array_length", [(Ptr I64, Id tmp_id); (I64, ind_op)])
+      ; ptr_id, Gep (arr_ty, arr_op, [i64_op_of_int 0; i64_op_of_int 1; ind_op])
+      ]
 
    
 
