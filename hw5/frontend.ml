@@ -126,26 +126,26 @@ end
    NOTE: structure types are named, so they compile to their named form
 *)
 
-let rec cmp_ty (ct : TypeCtxt.t) : Ast.ty -> Ll.ty = function
+let rec cmp_ty (tc: TypeCtxt.t) : Ast.ty -> Ll.ty = function
   | Ast.TBool  -> I1
   | Ast.TInt   -> I64
-  | Ast.TRef r -> Ptr (cmp_rty ct r)
-  | Ast.TNullRef r -> Ptr (cmp_rty ct r)
+  | Ast.TRef r -> Ptr (cmp_rty tc r)
+  | Ast.TNullRef r -> Ptr (cmp_rty tc r)
 
 
-and cmp_ret_ty ct : Ast.ret_ty -> Ll.ty = function
+and cmp_ret_ty (tc: TypeCtxt.t) : Ast.ret_ty -> Ll.ty = function
   | Ast.RetVoid  -> Void
-  | Ast.RetVal t -> cmp_ty ct t
+  | Ast.RetVal t -> cmp_ty tc t
 
-and cmp_fty ct (ts, r) : Ll.fty =
-  List.map (cmp_ty ct) ts, cmp_ret_ty ct r
+and cmp_fty (tc: TypeCtxt.t) (ts, r) : Ll.fty =
+  List.map (cmp_ty tc) ts, cmp_ret_ty tc r
 
-and cmp_rty ct : Ast.rty -> Ll.ty = function
+and cmp_rty (tc: TypeCtxt.t) : Ast.rty -> Ll.ty = function
   | Ast.RString  -> I8
-  | Ast.RArray u -> Struct [I64; Array (0, cmp_ty ct u)]
+  | Ast.RArray u -> Struct [I64; Array (0, cmp_ty tc u)]
   | Ast.RStruct r -> Namedt r
   | Ast.RFun (ts, t) -> 
-      let args, ret = cmp_fty ct (ts, t) in
+      let args, ret = cmp_fty tc (ts, t) in
       Fun (args, ret)
 
 let typ_of_binop : Ast.binop -> Ast.ty * Ast.ty * Ast.ty = function
@@ -170,7 +170,7 @@ let gensym : string -> string =
    Note that since structured values are manipulated by reference, all
    Oat values take 8 bytes on the stack.
 *)
-let size_oat_ty (t : Ast.ty) = 8L
+let size_oat_ty (t: Ast.ty) = 8L
 
 let str_arr_ty s = Array(1 + String.length s, I8)
 let i1_op_of_bool b   = Ll.Const (if b then 1L else 0L)
@@ -200,7 +200,7 @@ let decode_arr_ty (arr_struct_ptr_ty: Ll.ty) : Ll.ty * Ll.ty =
 (* Generate code to allocate an array of source type TRef (RArray t) of the
    given size. Note "size" is an operand whose value can be computed at
    runtime *)
-let oat_alloc_array ct (t:Ast.ty) (size:Ll.operand) : Ll.ty * operand * stream =
+let oat_alloc_array ct (t: Ast.ty) (size: Ll.operand) : Ll.ty * operand * stream =
   let ans_id, arr_id = gensym "array", gensym "raw_array" in
   let ans_ty = cmp_ty ct @@ TRef (RArray t) in
   let arr_ty = Ptr I64 in
@@ -231,7 +231,7 @@ let cmp_binop_to_bop : Ast.binop -> Ll.bop = function
   | Add  -> Ll.Add
   | Sub  -> Ll.Sub
   | Mul  -> Ll.Mul
-  | And  -> Ll.And  (* TODO: really? *)
+  | And  -> Ll.And
   | Or   -> Ll.Or
   | IAnd -> Ll.And
   | IOr  -> Ll.Or
@@ -253,7 +253,7 @@ let cmp_binop_to_cnd : Ast.binop -> Ll.cnd = function
    recieve the value of the expression, and the stream of instructions
    implementing the expression. 
 *)
-let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.operand * stream =
+let rec cmp_exp (tc: TypeCtxt.t) (c: Ctxt.t) (exp: Ast.exp node) : Ll.ty * Ll.operand * stream =
   match exp.elt with
   | Ast.CInt i  -> I64, Const i, []
   | Ast.CNull r -> cmp_ty tc (TNullRef r), Null, []
@@ -330,7 +330,7 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
     let ptr_ans_ty, ptr_op, code = cmp_exp_lhs tc c exp in
     let ans_ty = decode_ptr_ty ptr_ans_ty in
     let ans_id = gensym "index" in
-    ans_ty, Id ans_id, code >:: I(ans_id, Load(Ptr ans_ty, ptr_op))
+    ans_ty, Id ans_id, code >:: I (ans_id, Load (ptr_ans_ty, ptr_op))
 
   | Ast.Call (f, es) ->
     cmp_call tc c f es 
@@ -430,10 +430,10 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
     let ptr_ans_ty, ptr_op, code = cmp_exp_lhs tc c exp in
     let ans_ty = decode_ptr_ty ptr_ans_ty in
     let ans_id = gensym "proj" in
-    ans_ty, Id ans_id, code >:: I(ans_id, Load(Ptr ans_ty, ptr_op))
+    ans_ty, Id ans_id, code >:: I (ans_id, Load (ptr_ans_ty, ptr_op))
 
 
-and cmp_exp_lhs (tc : TypeCtxt.t) (c:Ctxt.t) (e:exp node) : Ll.ty * Ll.operand * stream =
+and cmp_exp_lhs (tc: TypeCtxt.t) (c: Ctxt.t) (e: exp node) : Ll.ty * Ll.operand * stream =
   match e.elt with
   | Ast.Id x ->
     let t, op = Ctxt.lookup x c in
@@ -483,8 +483,6 @@ and cmp_exp_lhs (tc : TypeCtxt.t) (c:Ctxt.t) (e:exp node) : Ll.ty * Ll.operand *
       ; ptr_id, Gep (arr_ty, arr_op, [i64_op_of_int 0; i64_op_of_int 1; ind_op])
       ]
 
-   
-
   | _ -> failwith "invalid lhs expression"
 
 and cmp_call (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) (es:Ast.exp node list) : Ll.ty * Ll.operand * stream =
@@ -499,13 +497,13 @@ and cmp_call (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) (es:Ast.exp node li
          (t, arg_op)::args, arg_code @ code
       ) es ts ([],[]) in
   let res_id = gensym "result" in
-  rt, Id res_id, s >@ args_code >:: I(res_id, Call(rt, op, args))
+  rt, Id res_id, s >@ args_code >:: I (res_id, Call (rt, op, args))
 
 and cmp_exp_as (tc : TypeCtxt.t) (c:Ctxt.t) (e:Ast.exp node) (t:Ll.ty) : Ll.operand * stream =
   let from_t, op, code = cmp_exp tc c e in
   if from_t = t then op, code
   else let res_id = gensym "cast" in
-    Id res_id, code >:: I(res_id, Bitcast(from_t, op, t))
+    Id res_id, code >:: I (res_id, Bitcast (from_t, op, t))
 
 (* Compile a statement in context c with return typ rt. Return a new context, 
    possibly extended with new local bindings, and the instruction stream
@@ -516,21 +514,21 @@ and cmp_exp_as (tc : TypeCtxt.t) (c:Ctxt.t) (e:Ast.exp node) (t:Ll.ty) : Ll.oper
    program is not well-formed and your compiler may throw an error.
  *)
 and cmp_stmt (tc : TypeCtxt.t) (c:Ctxt.t) (rt:Ll.ty) (stmt:Ast.stmt node) : Ctxt.t * stream =
-    
+
   match stmt.elt with
   | Ast.Decl (id, init) ->
      let ll_ty, init_op, init_code = cmp_exp tc c init in
      let res_id = gensym id in
      let c' = Ctxt.add c id (Ptr ll_ty, Id res_id) in
      c', init_code 
-         >:: E(res_id, Alloca ll_ty)
-         >:: I("",     Store (ll_ty, init_op, Id res_id))
+         >:: E (res_id, Alloca ll_ty)
+         >:: I ("",     Store (ll_ty, init_op, Id res_id))
      
-  | Ast.Assn (path ,e) ->
-     let lhs_ty, pop, path_code = cmp_exp_lhs tc c path in
-     let exp_ty = decode_ptr_ty lhs_ty in
-     let eop, exp_code = cmp_exp_as tc c e exp_ty in
-     c, path_code >@ exp_code >:: I("", (Store (exp_ty, eop, pop)))
+  | Ast.Assn (lhs, rhs) ->
+     let lhs_ty, lhs_op, lhs_code = cmp_exp_lhs tc c lhs in
+     let rhs_ty = decode_ptr_ty lhs_ty in
+     let rhs_op, rhs_code = cmp_exp_as tc c rhs rhs_ty in
+     c, lhs_code >@ rhs_code >:: I ("", (Store (rhs_ty, rhs_op, lhs_op)))
 
   | Ast.If (guard, st1, st2) -> 
      let guard_ty, guard_op, guard_code = cmp_exp tc c guard in
@@ -538,9 +536,9 @@ and cmp_stmt (tc : TypeCtxt.t) (c:Ctxt.t) (rt:Ll.ty) (stmt:Ast.stmt node) : Ctxt
      let else_code = cmp_block tc c rt st2 in
      let lt, le, lm = gensym "then", gensym "else", gensym "merge" in
      c, guard_code 
-        >:: T(Cbr (guard_op, lt, le))
-        >:: L lt >@ then_code >:: T(Br lm) 
-        >:: L le >@ else_code >:: T(Br lm) 
+        >:: T (Cbr (guard_op, lt, le))
+        >:: L lt >@ then_code >:: T (Br lm)
+        >:: L le >@ else_code >:: T (Br lm)
         >:: L lm
 
   (* CAST TASK: Fill in this case of the compiler to implement the 'if?' checked
@@ -612,7 +610,7 @@ and cmp_stmt (tc : TypeCtxt.t) (c:Ctxt.t) (rt:Ll.ty) (stmt:Ast.stmt node) : Ctxt
      c, code
 
 (* Compile a series of statements *)
-and cmp_block (tc : TypeCtxt.t) (c:Ctxt.t) (rt:Ll.ty) (stmts:Ast.block) : stream =
+and cmp_block (tc: TypeCtxt.t) (c: Ctxt.t) (rt: Ll.ty) (stmts: Ast.block) : stream =
   snd @@ List.fold_left (fun (c, code) s -> 
       let c, stmt_code = cmp_stmt tc c rt s in
       c, code >@ stmt_code
@@ -624,7 +622,7 @@ and cmp_block (tc : TypeCtxt.t) (c:Ctxt.t) (rt:Ll.ty) (stmts:Ast.block) : stream
    the H component from the Typechecker rather than recomputing this
    information here, but we do it this way to make the two parts of
    the project less interdependent.  *)
-let get_struct_defns (p:Ast.prog) : TypeCtxt.t =
+let get_struct_defns (p: Ast.prog) : TypeCtxt.t =
   List.fold_right (fun d ts ->
     match d with
     | Ast.Gtdecl { elt=(id, fs) } ->
@@ -637,7 +635,7 @@ let get_struct_defns (p:Ast.prog) : TypeCtxt.t =
 
    NOTE: The Gid of a function is just its source name
 *)
-let cmp_function_ctxt (tc : TypeCtxt.t) (c:Ctxt.t) (p:Ast.prog) : Ctxt.t =
+let cmp_function_ctxt (tc: TypeCtxt.t) (c: Ctxt.t) (p: Ast.prog) : Ctxt.t =
     List.fold_left (fun c -> function
       | Ast.Gfdecl { elt={ frtyp; fname; args } } ->
          let ft = TRef (RFun (List.map fst args, frtyp)) in
@@ -652,7 +650,7 @@ let cmp_function_ctxt (tc : TypeCtxt.t) (c:Ctxt.t) (p:Ast.prog) : Ctxt.t =
    in well-formed programs. (The constructors starting with C and Id's 
    for global function values). 
 *)
-let cmp_global_ctxt (tc : TypeCtxt.t) (c:Ctxt.t) (p:Ast.prog) : Ctxt.t =
+let cmp_global_ctxt (tc: TypeCtxt.t) (c: Ctxt.t) (p: Ast.prog) : Ctxt.t =
   let gexp_ty c = function
     | Id id -> fst (Ctxt.lookup id c)
     | CStruct (t, cs) -> Ptr (Namedt t)
@@ -673,7 +671,7 @@ let cmp_global_ctxt (tc : TypeCtxt.t) (c:Ctxt.t) (p:Ast.prog) : Ctxt.t =
    and a list of global declarations containing the string literals appearing
    in the function.
  *)
-let cmp_fdecl (tc : TypeCtxt.t) (c:Ctxt.t) (f:Ast.fdecl node) : Ll.fdecl * (Ll.gid * Ll.gdecl) list =
+let cmp_fdecl (tc: TypeCtxt.t) (c: Ctxt.t) (f: Ast.fdecl node) : Ll.fdecl * (Ll.gid * Ll.gdecl) list =
   let {frtyp; args; body} = f.elt in
   let add_arg (s_typ, s_id) (c,code,args) =
     let ll_id = gensym s_id in
@@ -709,7 +707,7 @@ let cmp_fdecl (tc : TypeCtxt.t) (c:Ctxt.t) (f:Ast.fdecl node) : Ll.fdecl * (Ll.g
 (* Compile a global initializer, returning the resulting LLVMlite global
    declaration, and a list of additional global declarations.
 *)
-let rec cmp_gexp c (tc : TypeCtxt.t) (e:Ast.exp node) : Ll.gdecl * (Ll.gid * Ll.gdecl) list =
+let rec cmp_gexp c (tc: TypeCtxt.t) (e: Ast.exp node) : Ll.gdecl * (Ll.gid * Ll.gdecl) list =
   match e.elt with
   | CNull r -> (cmp_ty tc (TNullRef r), GNull), []
   | CBool b -> (I1, (if b then GInt 1L else GInt 0L)), []
