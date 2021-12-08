@@ -507,15 +507,39 @@ and cmp_stmt (tc : TypeCtxt.t) (c:Ctxt.t) (rt:Ll.ty) (stmt:Ast.stmt node) : Ctxt
        - check whether the value computed by exp is null, if so jump to
          the 'null' block, otherwise take the 'notnull' block
 
-       - the identifier id is in scope in the 'nutnull' block and so 
+       - the identifier id is in scope in the 'notnull' block and so
          needs to be allocated (and added to the context)
 
        - as in the if-the-else construct, you should jump to the common
          merge label after either block
   *)
-  (* TODO: test *)
-  | Ast.Cast (typ, id, exp, notnull, null) ->
-    failwith "todo: implement Ast.Cast case"
+  (* TODO: test!!!!!!!!!! *)
+  | Ast.Cast (rty, x, exp, notnull, null) ->
+
+    let ll_ty = cmp_ty tc (TRef rty) (* Ptr *) in
+    let exp_op, exp_code = cmp_exp_as tc c exp ll_ty in
+
+    let cond_uid = gensym "cond" in
+
+    let x_uid = gensym x in
+    let c' = Ctxt.add c x (Ptr ll_ty (* double pointer *), Id x_uid) in
+
+    let notnull_lbl = gensym "notnull" in
+    let null_lbl = gensym "null" in
+    let merge_lbl = gensym "merge" in
+
+    c, exp_code
+       >:: I (cond_uid, Icmp (Ne, ll_ty, exp_op, Null))
+       >:: T (Cbr (Id cond_uid, notnull_lbl, null_lbl))
+       >:: L notnull_lbl
+       >:: E (x_uid, Alloca ll_ty)
+       >:: I ("", Store (ll_ty, exp_op, Id x_uid))
+       >@  cmp_block tc c' (* use new context *) rt notnull
+       >:: T (Br merge_lbl)
+       >:: L null_lbl
+       >@  cmp_block tc c rt null
+       >:: T (Br merge_lbl)
+       >:: L null_lbl
 
   | Ast.While (guard, body) ->
      let guard_ty, guard_op, guard_code = cmp_exp tc c guard in
