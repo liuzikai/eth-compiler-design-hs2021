@@ -391,7 +391,7 @@ let rec typecheck_stmt (tc: Tctxt.t) (s: Ast.stmt node) (to_ret: ret_ty) : Tctxt
       let cnt = List.length ts in
       let cnt' = List.length args in
       if cnt <> cnt' then
-        type_error s ("expecting " ^ (Int.to_string cnt) ^ " argument(s) but " ^ (Int.to_string cnt') ^ " are given")
+        type_error s ("expecting " ^ (string_of_int cnt) ^ " argument(s) but " ^ (string_of_int cnt') ^ " are given")
       else
         (* Check each argument *)
         let check_arg (t1: Ast.ty) (exp1: Ast.exp node) = (
@@ -438,7 +438,34 @@ let rec typecheck_stmt (tc: Tctxt.t) (s: Ast.stmt node) (to_ret: ret_ty) : Tctxt
       tc (* L *), false (* might not return*)
   )
 
-  | _ -> failwith "todo: implement typecheck_stmt"
+  (* TYP_ FOR *)
+  | For(vdecls, exp_opt, stmt_opt, block) -> (
+    let tc_with_L2 = List.fold_left (typecheck_vdecl s) tc vdecls in
+    match exp_opt, stmt_opt with
+    | Some exp, Some stmt -> if (typecheck_exp tc_with_L2 exp <> TBool) then
+                                type_error s ("expression does not have type bool")
+                             else if (snd (typecheck_stmt tc_with_L2 stmt to_ret)) then
+                                type_error s ("for loop stmt error")
+                             else let _ = typecheck_block tc_with_L2 block to_ret in
+                                tc (* L *), false (* might not return*)
+    | _ -> tc (* L *), false (* might not return*)
+  )
+
+  (* TYP_ RETT *)
+  | Ret Some exp -> (
+    match to_ret with
+    | RetVal t -> if not (subtype tc (typecheck_exp tc exp) t) then
+                    type_error s ("ret val error")
+                  else tc (* L *), true (* definitely returns  *)
+    | _ -> type_error s ("ret val error")
+  )
+
+  (* TYP_RETVOID *)
+  | Ret None -> (
+    if to_ret <> RetVoid then
+        type_error s ("ret void error")
+    else tc (* L *), true (* definitely returns  *)
+  )
 
 (* H;G;L;rt |- block;returns, TYP_BLOCK *)
 and typecheck_block (tc: Tctxt.t) (b: Ast.block) (to_ret: ret_ty) : bool =
