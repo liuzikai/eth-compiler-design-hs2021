@@ -223,7 +223,7 @@ let oat_alloc_struct ct (id: Ast.id) : Ll.ty * operand * stream =
   let ans_ty = cmp_ty ct @@ TRef (RStruct id) in
   let raw_ty = Ptr I64 in
   ans_ty, Id ans_id, lift
-    [ raw_id, Call (raw_ty, Gid "oat_malloc", [I64, i64_op_of_int (List.length fields)])
+    [ raw_id, Call (raw_ty, Gid "oat_malloc", [I64, i64_op_of_int (8 * List.length fields)])
     ; ans_id, Bitcast (raw_ty, Id raw_id, ans_ty) ]
 
 
