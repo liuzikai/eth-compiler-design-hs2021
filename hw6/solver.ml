@@ -86,8 +86,32 @@ module type FACT =
 *)
 module Make (Fact : FACT) (Graph : DFA_GRAPH with type fact := Fact.t) =
   struct
+    let rec process (new_g: Graph.t) (worklist: Graph.NodeS.elt list): Graph.t =
+        match worklist with
+        | [] -> new_g
+        | _ ->
+            match worklist with
+            | node :: remain ->
+                let n = Graph.NodeS.elements (Graph.preds new_g node) in (* let n = worklist.pop() *)
+                let old_out = Graph.out new_g node in (* old_out = out[n] *)
+                let preds = fun n -> Graph.out new_g n in
+                let preds_n = List.map preds n in (* preds[n] *)
+                let combined_in = Fact.combine preds_n in(* let in = combine(preds[n]) *)
+                let new_out = Graph.flow new_g node combined_in in(* out[n] = flow[n](in) *)
+                if (Fact.compare old_out new_out) <> 0 then(* if(!equal old_out out[n] *)
+                    (* for all m in succs[n], w.add(m) *)
+                    let succs_n = Graph.NodeS.elements (Graph.succs new_g node) in
+                    let add = fun n m -> [m] @ n in
+                    let added_w = List.fold_left add remain succs_n in
+                    let added_g = Graph.add_fact node new_out new_g in
+                    process added_g added_w
+                else process new_g remain
+            | _ -> failwith "process ends HERE"
 
     let solve (g:Graph.t) : Graph.t =
-      failwith "TODO HW6: Solver.solve unimplemented"
+        let worklist = Graph.NodeS.elements(Graph.nodes g) in (* let w = new set with all nodes*)
+           match worklist with
+           | [] -> g
+           | _ -> process g worklist
   end
 
