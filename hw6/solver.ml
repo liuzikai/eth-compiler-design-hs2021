@@ -101,7 +101,7 @@ module Make (Fact : FACT) (Graph : DFA_GRAPH with type fact := Fact.t) =
                 if (Fact.compare old_out new_out) <> 0 then(* if(!equal old_out out[n] *)
                     (* for all m in succs[n], w.add(m) *)
                     let succs_n = Graph.NodeS.elements (Graph.succs new_g node) in
-                    let add = fun n m -> [m] @ n in
+                    let add = fun n m -> n @ [m] in
                     let added_w = List.fold_left add remain succs_n in
                     let added_g = Graph.add_fact node new_out new_g in
                     process added_g added_w
