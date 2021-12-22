@@ -39,13 +39,43 @@ type fact = SymPtr.t UidM.t
  *)
 
 (* fun m (k,v) -> UidM.add k v m *)
-let insn_flow ((u,i):uid * insn) (d:fact) : fact =
+let insn_flow ((u, i): uid * insn) (d: fact) : fact =
   match i with
-  | Alloca _ -> UidM.add u SymPtr.Unique d
-  | Call (Ptr _, Id id, _) | Bitcast (_,Id id,_) | Gep (_,Id id,_) -> UidM.add u SymPtr.MayAlias (UidM.add id SymPtr.MayAlias d)
-  | Load (Ptr (Ptr _), _) | Call (Ptr _, _ ,_)-> UidM.add u SymPtr.MayAlias d
-  | Bitcast _  | Gep (_,_,_) -> UidM.add u SymPtr.MayAlias d
-  | Store (Ptr _,Id id,_) -> UidM.add id SymPtr.MayAlias d
+  | Alloca _ -> UidM.add u SymPtr.Unique d  (* return ptr *)
+
+  | Load (Ptr (Ptr _), _) -> UidM.add u SymPtr.MayAlias d  (* return ptr *)
+
+  | Call (ret_ty, _ , args) -> (
+    let d' = match ret_ty with
+    | Ptr _ -> UidM.add u SymPtr.MayAlias d  (* return ptr *)
+    | _ -> d
+    in
+    let fold_arg (lo: fact) ((ty, arg): Ll.ty * Ll.operand) : fact =
+      match (ty, arg) with
+      | Ptr _, Id id -> UidM.add id SymPtr.MayAlias lo  (* ptr as argument *)
+      | _ -> lo
+    in
+    List.fold_left fold_arg d' args
+  )
+
+  | Bitcast (from_ty, from_op, to_ty) -> (
+    let d' = match (from_ty, from_op) with
+    | Ptr _, Id id -> UidM.add id SymPtr.MayAlias d  (* ptr as argument *)
+    | _ -> d
+    in match to_ty with
+    | Ptr _ -> UidM.add u SymPtr.MayAlias d'  (* return ptr *)
+    | _ -> d'
+  )
+
+  | Gep (_, op, _) -> (
+    let d' = match op with
+    | Id id -> UidM.add id SymPtr.MayAlias d  (* ptr as argument *)
+    | _ -> d
+    in UidM.add u SymPtr.MayAlias d'  (* return ptr *)
+  )
+
+  | Store (Ptr _, Id id, _) -> UidM.add id SymPtr.MayAlias d  (* ptr as argument *)
+
   | _ -> d
 
 (* The flow function across terminators is trivial: they never change alias info *)
