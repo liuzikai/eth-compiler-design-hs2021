@@ -17,6 +17,10 @@ module SymPtr =
       | Unique -> "Unique"
       | UndefAlias -> "UndefAlias"
 
+    let join_facts f1 f2 = match f1, f2 with
+      | Unique, Unique -> Unique
+      | MayAlias, _ | _, MayAlias -> MayAlias
+      | UndefAlias, t | t, UndefAlias -> t
   end
 
 (* The analysis computes, at each program point, which UIDs in scope are a unique name
@@ -33,9 +37,16 @@ type fact = SymPtr.t UidM.t
    - Other instructions do not define pointers
 
  *)
-let insn_flow ((u,i):uid * insn) (d:fact) : fact =
-  failwith "Alias.insn_flow unimplemented"
 
+(* fun m (k,v) -> UidM.add k v m *)
+let insn_flow ((u,i):uid * insn) (d:fact) : fact =
+  match i with
+  | Alloca _ -> UidM.add u SymPtr.Unique d
+  | Call (Ptr _, Id id, _) | Bitcast (_,Id id,_) | Gep (_,Id id,_) -> UidM.add u SymPtr.MayAlias (UidM.add id SymPtr.MayAlias d)
+  | Load (Ptr (Ptr _), _) | Call (Ptr _, _ ,_)-> UidM.add u SymPtr.MayAlias d
+  | Bitcast _  | Gep (_,_,_) -> UidM.add u SymPtr.MayAlias d
+  | Store (Ptr _,Id id,_) -> UidM.add id SymPtr.MayAlias d
+  | _ -> d
 
 (* The flow function across terminators is trivial: they never change alias info *)
 let terminator_flow t (d:fact) : fact = d
@@ -68,8 +79,14 @@ module Fact =
        It may be useful to define a helper function that knows how to take the
        join of two SymPtr.t facts.
     *)
+    let join (d: fact) (e: fact): fact =
+            UidM.merge (fun _ f1 f2 ->
+                        match f1, f2 with
+                          | Some f1, Some f2 -> Some (SymPtr.join_facts f1 f2)
+                          | v, None | None, v -> v
+                       ) d e
     let combine (ds:fact list) : fact =
-      failwith "Alias.Fact.combine not implemented"
+        List.fold_left join UidM.empty ds
   end
 
 (* instantiate the general framework ---------------------------------------- *)
