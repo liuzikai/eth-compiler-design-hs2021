@@ -92,10 +92,10 @@ module Make (Fact : FACT) (Graph : DFA_GRAPH with type fact := Fact.t) =
       let preds =  (Graph.preds g n) in                         (* preds[n] *)
       let pred_outs = List.map (Graph.out g) (Graph.NodeS.elements preds) in
       let combined_in = Fact.combine pred_outs in               (* let in = combine(preds[n]) *)
-      let new_out = Graph.flow g n combined_in in            (* out[n] = flow[n](in) *)
+      let new_out = Graph.flow g n combined_in in               (* out[n] = flow[n](in) *)
       if (Fact.compare old_out new_out) <> 0 then               (* if (!equal old_out out[n] *)
           Graph.add_fact n new_out g,                           (* apply new_out *)
-          Graph.NodeS.union next_worklist (Graph.succs g n)  (* for all m in succs[n], w.add(m) *)
+          Graph.NodeS.union next_worklist (Graph.succs g n)     (* for all m in succs[n], w.add(m) *)
       else g, next_worklist
 
     let rec process (g: Graph.t) (worklist: Graph.NodeS.t) : Graph.t =
