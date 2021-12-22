@@ -53,6 +53,7 @@ let insn_flow ((u, i): uid * insn) (d: fact) : fact =
     let fold_arg (lo: fact) ((ty, arg): Ll.ty * Ll.operand) : fact =
       match (ty, arg) with
       | Ptr _, Id id -> UidM.add id SymPtr.MayAlias lo  (* ptr as argument *)
+      | Ptr _, Gid gid -> UidM.add gid SymPtr.MayAlias lo  (* ptr as argument *)
       | _ -> lo
     in
     List.fold_left fold_arg d' args
@@ -61,6 +62,7 @@ let insn_flow ((u, i): uid * insn) (d: fact) : fact =
   | Bitcast (from_ty, from_op, to_ty) -> (
     let d' = match (from_ty, from_op) with
     | Ptr _, Id id -> UidM.add id SymPtr.MayAlias d  (* ptr as argument *)
+    | Ptr _, Gid gid -> UidM.add gid SymPtr.MayAlias d  (* ptr as argument *)
     | _ -> d
     in match to_ty with
     | Ptr _ -> UidM.add u SymPtr.MayAlias d'  (* return ptr *)

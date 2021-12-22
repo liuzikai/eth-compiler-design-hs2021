@@ -21,10 +21,22 @@ open Datastructures
 
    Hint: Consider using List.filter
  *)
-let dce_block (lb:uid -> Liveness.Fact.t) 
-              (ab:uid -> Alias.fact)
+
+let dce_block (lb:uid -> Liveness.Fact.t) (* type t = UidS.t *)
+              (ab:uid -> Alias.fact) (* type fact = SymPtr.t UidM.t *)
               (b:Ll.block) : Ll.block =
-  failwith "Dce.dce_block unimplemented"
+              (* type block = { insns : (uid * insn) list; term : (uid * terminator) } *)
+   let new_insns_list = List.filter (fun insn -> match insn with
+                                    | (_, Call(_,_,_)) -> true
+                                    | (u, Store(_, _, Id id)) -> begin match UidM.find_or Alias.SymPtr.UndefAlias(ab u) id with
+                                                                 | Alias.SymPtr.MayAlias -> true
+                                                                 | _ -> if UidS.mem id (lb u) then true
+                                                                        else false
+                                                                 end
+                                    | (u, i) -> if UidS.mem u (lb u) then true
+                                                else false
+                                    ) b.insns in
+   {insns = new_insns_list; term = b.term}
 
 let run (lg:Liveness.Graph.t) (ag:Alias.Graph.t) (cfg:Cfg.t) : Cfg.t =
 
@@ -41,4 +53,3 @@ let run (lg:Liveness.Graph.t) (ag:Alias.Graph.t) (cfg:Cfg.t) : Cfg.t =
     let b' = dce_block lb ab b in
     Cfg.add_block l b' cfg
   ) (Cfg.nodes cfg) cfg
-
