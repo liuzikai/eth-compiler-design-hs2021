@@ -840,11 +840,18 @@ let better_layout (f: Ll.fdecl) (live: liveness) : layout =
 
   (* Process instructions and collect all useful uids *)
   let insn_uids = ref UidSet.empty in
-  let first_uid = ref "" in
+(*  let first_uid = ref "" in*)
   let process_insn (g: IGraph.t) (uid: uid) (insn: Ll.insn) : IGraph.t =
-    if !first_uid = "" then first_uid := uid;
+(*    if !first_uid = "" then first_uid := uid;*)
     insn_uids := UidSet.add uid !insn_uids;
     IGraph.ensure_node g uid
+  in
+
+  (* Process terminator *)
+  let process_terminator (g: IGraph.t) ((uid, t): uid * Ll.terminator) : IGraph.t =
+    match t with
+    | Ret (_, Some (Id id)) -> IGraph.add_preference g id (Alloc.LReg Rax)
+    | _ -> g
   in
 
 
@@ -932,13 +939,13 @@ let better_layout (f: Ll.fdecl) (live: liveness) : layout =
   let g =
     fold_fdecl
       (fun g (uid, _ (* ty ignored *)) -> process_arg g uid)
-      (fun g lbl -> process_lbl g lbl)
+      process_lbl
       (fun g (uid, insn) ->
         if insn_assigns insn = false
         then (base_lo := (uid, Alloc.LVoid)::(!base_lo); g)
         else process_insn g uid insn
       )
-      (fun g _ -> g)
+      process_terminator
       IGraph.empty f in
   let g = process_liveness g live in
   let lo = allocate g in
