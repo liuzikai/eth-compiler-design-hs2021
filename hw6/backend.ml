@@ -856,13 +856,10 @@ let better_layout (f: Ll.fdecl) (live: liveness) : layout =
   in
 
 
-  (* The available palette of registers.  Excludes Rax and Rcx *)
-  let pal = LocSet.(caller_save
-                    |> remove (Alloc.LReg Rax)
-                    |> remove (Alloc.LReg Rcx)
-                   )
-  in
-  let pal_size = LocSet.cardinal pal in
+  (* The available palette of registers, excluding Rax and Rcx.
+     Former ones are preferred as they are less likely to be used as function arguments *)
+  let pal = [ R10; R11; R09; R08; Rdx; Rsi; Rdi; ] |> List.map (fun r -> Alloc.LReg r) in
+  let pal_size = List.length pal in
 
   (* Map coloring
       Remove/freeze no-preference nodes first, to allow more choices for nodes with preference.
@@ -891,14 +888,19 @@ let better_layout (f: Ll.fdecl) (live: liveness) : layout =
 
       (* Assign color on backtrack *)
       let used_locs = UidSet.fold (fun v -> LocSet.add (List.assoc v lo)) (IGraph.adjacent_nodes g n) LocSet.empty in
-      let available_locs = LocSet.diff pal used_locs in
 
       let loc =
         try (
           let preference = IGraph.get_preference_opt g n in
           match preference with
-          | None -> LocSet.choose available_locs    (* no preference, randomly choose one *)
-          | Some x -> LocSet.find x available_locs  (* try to assign according to the preference *)
+          (* No preference, choose a preferred one *)
+          | None -> List.find (fun loc -> ((LocSet.mem loc used_locs) = false)) pal
+          | Some x -> (
+            (* Try to choose according to the preference *)
+            try List.find (fun loc -> (((LocSet.mem loc used_locs) = false) && (loc = x))) pal with
+            (* The preference cannot be satisfied, choose a preferred one *)
+            | Not_found -> List.find (fun loc -> ((LocSet.mem loc used_locs) = false)) pal
+          )
         ) with
         | Not_found -> spill ()  (* cannot assign, spill *)
       in
