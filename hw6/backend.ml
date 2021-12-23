@@ -753,6 +753,10 @@ module IGraph =
 
     let empty = {i = UidMap.empty; i_keys = UidSet.empty; p = UidMap.empty; p_keys = UidSet.empty}
 
+    let add_node (g: t) (u: Ll.uid) : t =
+      {g with i = (UidMap.add u UidSet.empty g.i)
+            ; i_keys = (UidSet.add u g.i_keys)}
+
     (* Add single edge from u to v *)
     let add_directed_edge (g: t) (u: Ll.uid) (v: Ll.uid) : t =
       let old_set = UidMap.find_or UidSet.empty g.i u in
@@ -800,6 +804,12 @@ module IGraph =
 
 let better_layout (f: Ll.fdecl) (live: liveness) : layout =
 
+  (* Spill helper *)
+  let n_spill = ref 0 in
+  let spill () = (incr n_spill; Alloc.LStk (- !n_spill)) in
+
+  let base_lo = ref [] in
+
   (* Add preference for an incoming function parameter, excluding Rcx since we cannot use it *)
   let n_arg = ref 0 in
   let process_arg (g: IGraph.t) (uid: uid) : IGraph.t =
@@ -808,21 +818,20 @@ let better_layout (f: Ll.fdecl) (live: liveness) : layout =
       | Alloc.LReg Rcx -> g
       | x -> IGraph.add_preference g uid x
     in
-    incr n_arg; res
+    incr n_arg; IGraph.add_node res uid
   in
 
   (* Process labels *)
-  let lbl_loc = ref [] in
   let process_lbl (g: IGraph.t) (lbl: lbl) : IGraph.t =
-    lbl_loc := (lbl, Alloc.LLbl (Platform.mangle lbl))::(!lbl_loc); g
+    base_lo := (lbl, Alloc.LLbl (Platform.mangle lbl))::(!base_lo); g
   in
 
 
   (* Process instructions and collect all useful uids *)
-  let all_uids = ref UidSet.empty in
+  let insn_uids = ref UidSet.empty in
   let process_insn (g: IGraph.t) (uid: uid) (insn: Ll.insn) : IGraph.t =
-    all_uids := UidSet.add uid !all_uids;
-    g (* TODO: add preference *)
+    insn_uids := UidSet.add uid !insn_uids;
+    IGraph.add_node g uid (* TODO: add preference *)
   in
 
 
@@ -831,7 +840,7 @@ let better_layout (f: Ll.fdecl) (live: liveness) : layout =
     let fold_u (u: uid) (g: IGraph.t) =
       UidSet.fold (fun v g -> IGraph.add_bidirectional_edge g u v) (live.live_in u) g
     in
-    UidSet.fold fold_u !all_uids g
+    UidSet.fold fold_u !insn_uids g
   in
 
 
@@ -843,17 +852,13 @@ let better_layout (f: Ll.fdecl) (live: liveness) : layout =
   in
   let pal_size = LocSet.cardinal pal in
 
-  (* Spill helper *)
-  let n_spill = ref 0 in
-  let spill () = (incr n_spill; Alloc.LStk (- !n_spill)) in
-
   (* Map coloring
       Remove/freeze no-preference nodes first, to allow more choices for nodes with preference.
       Remove/freeze a randomly selected node.
       Assign colors on backtrack.
   *)
   let rec allocate (g: IGraph.t) : (uid * Alloc.loc) list =
-    if (UidSet.is_empty g.i_keys) then !lbl_loc  (* done, using !lbl_loc as base *)
+    if (UidSet.is_empty g.i_keys) then !base_lo (* done, using !base_lo as base *)
     else
 
       (* Choose a node in a set (random for now) *)
@@ -886,7 +891,7 @@ let better_layout (f: Ll.fdecl) (live: liveness) : layout =
         | Not_found -> spill ()  (* cannot assign, spill *)
       in
 
-      Platform.verb @@ Printf.sprintf "allocated: %s <- %s\n" (Alloc.str_loc loc) n;
+      Printf.printf "allocated: %s <- %s\n" (Alloc.str_loc loc) n;
       (n, loc)::lo
 
   in
@@ -898,10 +903,12 @@ let better_layout (f: Ll.fdecl) (live: liveness) : layout =
       (fun g (uid, insn) ->
         if insn_assigns insn
         then process_insn g uid insn
-        else g)
+        else let _ = base_lo := (uid, Alloc.LVoid)::(!base_lo) in g)
       (fun g _ -> g)
       IGraph.empty f in
-  { uid_loc = (fun x -> List.assoc x (allocate (process_liveness g live)))
+  let g = process_liveness g live in
+  let lo = allocate g in
+  { uid_loc = (fun x -> try List.assoc x lo with Not_found -> Printf.printf "missing %s\n" x; failwith "missing lo")
   ; spill_bytes = 8 * !n_spill
   }
 
