@@ -844,13 +844,25 @@ let better_layout (f: Ll.fdecl) (live: liveness) : layout =
   let process_insn (g: IGraph.t) (uid: uid) (insn: Ll.insn) : IGraph.t =
 (*    if !first_uid = "" then first_uid := uid;*)
     insn_uids := UidSet.add uid !insn_uids;
-    IGraph.ensure_node g uid
+    let g = IGraph.ensure_node g uid in
+    (*match insn with
+    | Call (_, _, args) -> (
+      let fold_arg ((n, g): int * IGraph.t) ((_, arg): Ll.ty * Ll.operand) : (int * IGraph.t) =
+        match arg with
+        | Id id -> n + 1, IGraph.add_preference g id (arg_loc n)
+        | _ -> n + 1, g
+      in
+      let _, g = List.fold_left fold_arg (0, g) args in
+      g
+    )
+    | _ ->*) g
   in
 
   (* Process terminator *)
   let process_terminator (g: IGraph.t) ((uid, t): uid * Ll.terminator) : IGraph.t =
     match t with
-    | Ret (_, Some (Id id)) -> IGraph.add_preference g id (Alloc.LReg Rax)
+    (* Ret is NOT allowed to use Rax, handled specially in allocate below *)
+    (*| Ret (_, Some (Id id)) -> IGraph.add_preference g id (Alloc.LReg Rax)*)
     | _ -> g
   in
 
@@ -920,6 +932,12 @@ let better_layout (f: Ll.fdecl) (live: liveness) : layout =
           match preference with
           (* No preference, choose a preferred one *)
           | None -> List.find (fun loc -> ((LocSet.mem loc used_locs) = false)) pal
+          (* Ret is NOT allowed to use Rax if not used already *)
+          (*| Some (Alloc.LReg Rax) -> (
+            if (LocSet.mem (Alloc.LReg Rax) used_locs) = false
+            then Alloc.LReg Rax
+            else List.find (fun loc -> ((LocSet.mem loc used_locs) = false)) pal
+          )*)
           | Some (Alloc.LReg x) -> (
             (* Try to choose according to the preference *)
             try List.find (fun loc -> (((LocSet.mem loc used_locs) = false) && (loc = (Alloc.LReg x)))) pal with
