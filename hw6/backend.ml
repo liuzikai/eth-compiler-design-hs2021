@@ -847,8 +847,8 @@ let better_layout (f: Ll.fdecl) (live: liveness) : layout =
   (* Transform liveness information to interference graph *)
   let process_liveness (g: IGraph.t) (live: liveness) : IGraph.t =
     let fold_live_in_at_uid (uid: uid) (g: IGraph.t) =
-      let s = live.live_in uid in
-      let g = UidSet.fold (fun v g -> IGraph.add_bidirectional_edge g uid v) s g in
+      (* NOTE: use live_out with DCE *)
+      let s = live.live_out uid in
       (* Add edge for every combination *)
       UidSet.fold (fun u g -> UidSet.fold (fun v g -> IGraph.add_directed_edge g u v) s g) s g
     in
@@ -856,9 +856,13 @@ let better_layout (f: Ll.fdecl) (live: liveness) : layout =
   in
 
 
-  (* The available palette of registers, excluding Rax and Rcx.
-     Former ones are preferred as they are less likely to be used as function arguments *)
-  let pal = [ R10; R11; R09; R08; Rdx; Rsi; Rdi; ] |> List.map (fun r -> Alloc.LReg r) in
+  (* The available palette of registers, excluding Rax and Rcx. *)
+
+  (*  Former ones are preferred as they are less likely to be used as function arguments *)
+  (* let pal = [ R10; R11; R09; R08; Rdx; Rsi; Rdi; ] |> List.map (fun r -> Alloc.LReg r) in *)
+  (* NOTE: not true. They need to be always saved. *)
+
+  let pal = [ Rdi; Rsi; Rdx; R09; R08; R10; R11 ] |> List.map (fun r -> Alloc.LReg r) in
   let pal_size = List.length pal in
 
   (* Map coloring
@@ -915,8 +919,10 @@ let better_layout (f: Ll.fdecl) (live: liveness) : layout =
       (fun g (uid, _ (* ty ignored *)) -> process_arg g uid)
       (fun g lbl -> process_lbl g lbl)
       (fun g (uid, insn) ->
-        if insn_assigns insn = false then base_lo := (uid, Alloc.LVoid)::(!base_lo);
-        process_insn g uid insn)
+        if insn_assigns insn = false
+        then (base_lo := (uid, Alloc.LVoid)::(!base_lo); g)
+        else process_insn g uid insn
+      )
       (fun g _ -> g)
       IGraph.empty f in
   let g = process_liveness g live in
