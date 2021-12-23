@@ -823,6 +823,8 @@ let better_layout (f: Ll.fdecl) (live: liveness) : layout =
       match arg_loc !n_arg with
       | Alloc.LReg Rcx -> g
       | x -> IGraph.add_preference g uid x
+(*      | Alloc.LReg x -> IGraph.add_preference g uid (Alloc.LReg x)*)
+(*      | _ -> g  (* no preference for stack slots *)*)
     in
     let g = IGraph.ensure_node res uid in
     let g = UidSet.fold (fun v g -> IGraph.add_bidirectional_edge g uid v) !arg_uids g in
@@ -838,19 +840,31 @@ let better_layout (f: Ll.fdecl) (live: liveness) : layout =
 
   (* Process instructions and collect all useful uids *)
   let insn_uids = ref UidSet.empty in
+  let first_uid = ref "" in
   let process_insn (g: IGraph.t) (uid: uid) (insn: Ll.insn) : IGraph.t =
+    if !first_uid = "" then first_uid := uid;
     insn_uids := UidSet.add uid !insn_uids;
-    IGraph.ensure_node g uid (* TODO: add preference *)
+    IGraph.ensure_node g uid
   in
 
 
   (* Transform liveness information to interference graph *)
   let process_liveness (g: IGraph.t) (live: liveness) : IGraph.t =
+    (* Helper *)
+    let fold_power_set g s =
+      UidSet.fold (fun u g -> UidSet.fold (fun v g -> IGraph.add_directed_edge g u v) s g) s g
+    in
+
+    (* Use live_in of the first uid to fold arguments *)
+(*    let s = live.live_in !first_uid in*)
+(*    let g = fold_power_set g s in*)
+
+    (* Fold instructions *)
     let fold_live_in_at_uid (uid: uid) (g: IGraph.t) =
       (* NOTE: use live_out with DCE *)
       let s = live.live_out uid in
       (* Add edge for every combination *)
-      UidSet.fold (fun u g -> UidSet.fold (fun v g -> IGraph.add_directed_edge g u v) s g) s g
+      fold_power_set g s
     in
     UidSet.fold fold_live_in_at_uid !insn_uids g
   in
@@ -899,12 +913,13 @@ let better_layout (f: Ll.fdecl) (live: liveness) : layout =
           match preference with
           (* No preference, choose a preferred one *)
           | None -> List.find (fun loc -> ((LocSet.mem loc used_locs) = false)) pal
-          | Some x -> (
+          | Some (Alloc.LReg x) -> (
             (* Try to choose according to the preference *)
-            try List.find (fun loc -> (((LocSet.mem loc used_locs) = false) && (loc = x))) pal with
+            try List.find (fun loc -> (((LocSet.mem loc used_locs) = false) && (loc = (Alloc.LReg x)))) pal with
             (* The preference cannot be satisfied, choose a preferred one *)
-            | Not_found -> List.find (fun loc -> ((LocSet.mem loc used_locs) = false)) pal
+            | Not_found -> (Platform.verb @@ Printf.sprintf "no-pref "); List.find (fun loc -> ((LocSet.mem loc used_locs) = false)) pal
           )
+          | Some x -> x
         ) with
         | Not_found -> spill ()  (* cannot assign, spill *)
       in
