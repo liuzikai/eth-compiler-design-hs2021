@@ -22,20 +22,24 @@ open Datastructures
    Hint: Consider using List.filter
  *)
 
-let dce_block (lb:uid -> Liveness.Fact.t) (* type t = UidS.t *)
-              (ab:uid -> Alias.fact) (* type fact = SymPtr.t UidM.t *)
-              (b:Ll.block) : Ll.block =
+let dce_block (lb: uid -> Liveness.Fact.t) (* type t = UidS.t *)
+              (ab: uid -> Alias.fact) (* type fact = SymPtr.t UidM.t *)
+              (b: Ll.block) : Ll.block =
               (* type block = { insns : (uid * insn) list; term : (uid * terminator) } *)
-   let new_insns_list = List.filter (fun insn -> match insn with
-                                    | (_, Call(_,_,_)) -> true
-                                    | (u, Store(_, _, Id id)) -> begin match UidM.find_or Alias.SymPtr.UndefAlias(ab u) id with
-                                                                 | Alias.SymPtr.MayAlias -> true
-                                                                 | _ -> if UidS.mem id (lb u) then true
-                                                                        else false
-                                                                 end
-                                    | (u, i) -> if UidS.mem u (lb u) then true
-                                                else false
-                                    ) b.insns in
+   let new_insns_list = List.filter (
+    function
+    | (_, Call(_, _, _)) -> true
+    | (u, Store(_, _, op)) -> (
+      match op with
+      | Id id -> (
+        match UidM.find_or Alias.SymPtr.UndefAlias (ab u) id with
+        | Alias.SymPtr.MayAlias -> true
+        | _ -> UidS.mem id (lb u)
+      )
+      | _ -> true
+    )
+    | (u, i) -> UidS.mem u (lb u)
+    ) b.insns in
    {insns = new_insns_list; term = b.term}
 
 let run (lg:Liveness.Graph.t) (ag:Alias.Graph.t) (cfg:Cfg.t) : Cfg.t =

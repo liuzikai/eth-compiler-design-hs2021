@@ -753,20 +753,25 @@ module IGraph =
 
     let empty = {i = UidMap.empty; i_keys = UidSet.empty; p = UidMap.empty; p_keys = UidSet.empty}
 
-    let add_node (g: t) (u: Ll.uid) : t =
+    let ensure_node (g: t) (u: Ll.uid) : t =
+      try (let _ = UidSet.find u g.i_keys in g) with Not_found ->
       {g with i = (UidMap.add u UidSet.empty g.i)
             ; i_keys = (UidSet.add u g.i_keys)}
 
     (* Add single edge from u to v *)
     let add_directed_edge (g: t) (u: Ll.uid) (v: Ll.uid) : t =
+      if u = v then g else
       let old_set = UidMap.find_or UidSet.empty g.i u in
       let new_set = UidSet.add v old_set in
+(*      Platform.verb @@ Printf.sprintf "edge: %s -> %s\n" u v;*)
       {g with i = (UidMap.add u new_set g.i)
             ; i_keys = (UidSet.add u g.i_keys)}
 
     (* Add bidirectional edges between u and v*)
     let add_bidirectional_edge (g: t) (u: Ll.uid) (v: Ll.uid) : t =
+      if u = v then g else begin
       add_directed_edge (add_directed_edge g u v) v u
+      end
 
     (* Get adjacent node set *)
     let adjacent_nodes (g: t) (u: Ll.uid) : UidSet.t =
@@ -812,13 +817,17 @@ let better_layout (f: Ll.fdecl) (live: liveness) : layout =
 
   (* Add preference for an incoming function parameter, excluding Rcx since we cannot use it *)
   let n_arg = ref 0 in
+  let arg_uids = ref UidSet.empty in
   let process_arg (g: IGraph.t) (uid: uid) : IGraph.t =
     let res =
       match arg_loc !n_arg with
       | Alloc.LReg Rcx -> g
       | x -> IGraph.add_preference g uid x
     in
-    incr n_arg; IGraph.add_node res uid
+    let g = IGraph.ensure_node res uid in
+    let g = UidSet.fold (fun v g -> IGraph.add_bidirectional_edge g uid v) !arg_uids g in
+    incr n_arg; arg_uids := UidSet.add uid !arg_uids; g
+
   in
 
   (* Process labels *)
@@ -831,16 +840,19 @@ let better_layout (f: Ll.fdecl) (live: liveness) : layout =
   let insn_uids = ref UidSet.empty in
   let process_insn (g: IGraph.t) (uid: uid) (insn: Ll.insn) : IGraph.t =
     insn_uids := UidSet.add uid !insn_uids;
-    IGraph.add_node g uid (* TODO: add preference *)
+    IGraph.ensure_node g uid (* TODO: add preference *)
   in
 
 
   (* Transform liveness information to interference graph *)
   let process_liveness (g: IGraph.t) (live: liveness) : IGraph.t =
-    let fold_u (u: uid) (g: IGraph.t) =
-      UidSet.fold (fun v g -> IGraph.add_bidirectional_edge g u v) (live.live_in u) g
+    let fold_live_in_at_uid (uid: uid) (g: IGraph.t) =
+      let s = live.live_in uid in
+      let g = UidSet.fold (fun v g -> IGraph.add_bidirectional_edge g uid v) s g in
+      (* Add edge for every combination *)
+      UidSet.fold (fun u g -> UidSet.fold (fun v g -> IGraph.add_directed_edge g u v) s g) s g
     in
-    UidSet.fold fold_u !insn_uids g
+    UidSet.fold fold_live_in_at_uid !insn_uids g
   in
 
 
@@ -891,7 +903,7 @@ let better_layout (f: Ll.fdecl) (live: liveness) : layout =
         | Not_found -> spill ()  (* cannot assign, spill *)
       in
 
-      Printf.printf "allocated: %s <- %s\n" (Alloc.str_loc loc) n;
+      Platform.verb @@ Printf.sprintf "allocated: %s <- %s\n" (Alloc.str_loc loc) n;
       (n, loc)::lo
 
   in
@@ -901,9 +913,8 @@ let better_layout (f: Ll.fdecl) (live: liveness) : layout =
       (fun g (uid, _ (* ty ignored *)) -> process_arg g uid)
       (fun g lbl -> process_lbl g lbl)
       (fun g (uid, insn) ->
-        if insn_assigns insn
-        then process_insn g uid insn
-        else let _ = base_lo := (uid, Alloc.LVoid)::(!base_lo) in g)
+        if insn_assigns insn = false then base_lo := (uid, Alloc.LVoid)::(!base_lo);
+        process_insn g uid insn)
       (fun g _ -> g)
       IGraph.empty f in
   let g = process_liveness g live in
